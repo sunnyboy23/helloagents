@@ -1,0 +1,254 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FullstackTaskState",
+  "description": "全栈模式任务状态管理 Schema",
+  "type": "object",
+  "required": ["task_group_id", "created_at", "tasks"],
+  "properties": {
+    "task_group_id": {
+      "type": "string",
+      "description": "任务组 ID，格式: YYYYMMDD-{功能名称}",
+      "pattern": "^\\d{8}-.+$"
+    },
+    "requirement": {
+      "type": "string",
+      "description": "原始需求描述"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "创建时间"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "最后更新时间"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "completed", "partial", "failed", "cancelled"],
+      "description": "任务组整体状态"
+    },
+    "progress": {
+      "type": "object",
+      "description": "进度统计",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_progress": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "execution_layers": {
+      "type": "array",
+      "description": "DAG 拓扑排序后的执行层级",
+      "items": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "层级编号"
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "该层级的任务 ID 列表"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "partial", "failed"],
+            "description": "层级执行状态"
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "object",
+      "description": "任务详情，key 为 task_id",
+      "additionalProperties": {
+        "$ref": "#/definitions/Task"
+      }
+    },
+    "tech_docs_synced": {
+      "type": "array",
+      "description": "已同步的技术文档",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "源文件路径"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "同步目标项目"
+          },
+          "synced_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Task": {
+      "type": "object",
+      "required": ["task_id", "engineer_id", "project", "description", "status"],
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "description": "任务 ID"
+        },
+        "engineer_id": {
+          "type": "string",
+          "description": "负责的工程师 ID"
+        },
+        "project": {
+          "type": "string",
+          "description": "目标项目路径"
+        },
+        "description": {
+          "type": "string",
+          "description": "任务描述"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "依赖的任务 ID 列表"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "completed", "partial", "failed", "blocked", "skipped"],
+          "description": "任务状态"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "开始执行时间"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "完成时间"
+        },
+        "result": {
+          "$ref": "#/definitions/TaskResult",
+          "description": "执行结果"
+        },
+        "error": {
+          "type": "string",
+          "description": "错误信息（失败时）"
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "重试次数"
+        }
+      }
+    },
+    "TaskResult": {
+      "type": "object",
+      "description": "任务执行结果",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["create", "modify", "delete"]
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "self_review": {
+          "type": "object",
+          "properties": {
+            "score": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "passed": {
+              "type": "boolean"
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "kb_updates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "enum": ["create", "update"]
+              }
+            }
+          }
+        },
+        "tech_docs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "sync_to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fullstack_message",
+  "title": "HelloAGENTS Fullstack Mode Message Schemas",
+  "description": "定义全栈模式下主代理与工程师之间的消息格式",
+
+  "definitions": {
+    "TaskMessage": {
+      "type": "object",
+      "description": "主代理派发给工程师的任务消息",
+      "required": ["task_id", "task_group_id", "engineer_id", "project", "description", "role_activation"],
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "description": "任务唯一标识"
+        },
+        "task_group_id": {
+          "type": "string",
+          "description": "任务组ID（一次需求的所有任务共享）"
+        },
+        "engineer_id": {
+          "type": "string",
+          "description": "目标工程师ID"
+        },
+        "project": {
+          "type": "string",
+          "description": "目标项目路径"
+        },
+        "description": {
+          "type": "string",
+          "description": "任务描述"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "依赖的任务ID列表"
+        },
+        "context": {
+          "type": "object",
+          "description": "上下文信息",
+          "properties": {
+            "requirement": { "type": "string", "description": "原始需求" },
+            "tech_docs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "相关技术文档路径"
+            },
+            "api_contracts": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "上游服务的API契约"
+            }
+          }
+        },
+        "role_activation": {
+          "type": "object",
+          "description": "激活的通用角色",
+          "properties": {
+            "reviewer": { "type": "boolean", "default": true, "description": "激活代码审查能力" },
+            "kb_keeper": { "type": "boolean", "default": true, "description": "激活知识库同步能力" },
+            "synthesizer": { "type": "boolean", "default": false, "description": "激活多源综合能力" },
+            "writer": { "type": "boolean", "default": false, "description": "激活文档撰写能力" }
+          }
+        },
+        "constraints": {
+          "type": "object",
+          "description": "约束条件",
+          "properties": {
+            "deadline": { "type": "string", "format": "date-time" },
+            "output_format": { "type": "string" },
+            "style_guide": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "ResultMessage": {
+      "type": "object",
+      "description": "工程师返回给主代理的结果消息",
+      "required": ["task_id", "engineer_id", "status"],
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "description": "任务唯一标识"
+        },
+        "engineer_id": {
+          "type": "string",
+          "description": "工程师ID"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "partial", "failed"],
+          "description": "任务状态"
+        },
+        "changes": {
+          "type": "array",
+          "description": "代码变更列表",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": { "type": "string", "description": "文件路径" },
+              "type": { "type": "string", "enum": ["create", "modify", "delete"] },
+              "scope": { "type": "string", "description": "修改范围（函数/类名）" },
+              "lines_changed": { "type": "integer" }
+            },
+            "required": ["file", "type"]
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "发现的问题或风险"
+        },
+        "verification": {
+          "type": "object",
+          "description": "验证结果",
+          "properties": {
+            "lint_passed": { "type": "boolean" },
+            "tests_passed": { "type": "boolean" },
+            "build_passed": { "type": "boolean" }
+          }
+        },
+        "self_review": {
+          "type": "object",
+          "description": "自审结果（继承 reviewer 角色能力）",
+          "properties": {
+            "score": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "description": "自评分数"
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "severity": { "type": "string", "enum": ["high", "medium", "low"] },
+                  "description": { "type": "string" },
+                  "location": { "type": "string" },
+                  "suggestion": { "type": "string" }
+                }
+              },
+              "description": "自审发现的问题"
+            },
+            "passed": { "type": "boolean", "description": "是否通过自审" }
+          }
+        },
+        "kb_updates": {
+          "type": "array",
+          "description": "知识库更新（继承 kb_keeper 角色能力）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": { "type": "string", "description": "更新的知识库文件" },
+              "type": { "type": "string", "enum": ["create", "update"] },
+              "summary": { "type": "string", "description": "更新摘要" }
+            },
+            "required": ["file", "type", "summary"]
+          }
+        },
+        "tech_docs": {
+          "type": "array",
+          "description": "输出的技术文档（后端工程师）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["api_contract", "database_design", "architecture"] },
+              "path": { "type": "string" },
+              "sync_to": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "需要同步到的目标项目"
+              }
+            },
+            "required": ["type", "path"]
+          }
+        },
+        "error": {
+          "type": "object",
+          "description": "错误信息（status=failed时）",
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "stack": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

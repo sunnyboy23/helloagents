@@ -98,6 +98,18 @@ def _self_uninstall() -> bool:
 # ---------------------------------------------------------------------------
 
 _AGENT_PREFIX = "ha-"  # HelloAGENTS agent files use this prefix
+_FULLSTACK_AGENT_FILES = {
+    "ha-orchestrator.md",
+    "ha-backend-java.md",
+    "ha-backend-python.md",
+    "ha-backend-go.md",
+    "ha-backend-nodejs.md",
+    "ha-frontend-react.md",
+    "ha-frontend-vue.md",
+    "ha-mobile-ios.md",
+    "ha-mobile-android.md",
+    "ha-mobile-harmony.md",
+}
 
 
 def _deploy_agent_files(dest_dir: Path) -> None:
@@ -114,6 +126,15 @@ def _deploy_agent_files(dest_dir: Path) -> None:
     if count:
         print(_msg(f"  已部署 {count} 个子代理定义 ({agents_dest})",
                    f"  Deployed {count} agent definition(s) ({agents_dest})"))
+
+    # Fullstack mode agent coverage check (best-effort informational)
+    deployed = {f.name for f in agents_dest.glob(f"{_AGENT_PREFIX}*.md")}
+    missing_fullstack = sorted(_FULLSTACK_AGENT_FILES - deployed)
+    if missing_fullstack:
+        print(_msg(
+            f"  ⚠ 全栈模式子代理缺失: {', '.join(missing_fullstack)}",
+            f"  ⚠ Missing fullstack agents: {', '.join(missing_fullstack)}",
+        ))
 
 
 def _remove_agent_files(dest_dir: Path) -> list[str]:

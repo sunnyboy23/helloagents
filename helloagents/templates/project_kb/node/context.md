@@ -1,0 +1,7 @@
+# Node.js 项目技术上下文
+
+- 项目名称: {项目名称}
+- 初始化时间: {创建时间}
+- 负责人: {工程师ID}
+- 推荐栈: Node.js / TypeScript / NestJS(Express) / Prisma(TypeORM)
+

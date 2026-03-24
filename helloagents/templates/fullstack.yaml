@@ -1,0 +1,165 @@
+# HelloAGENTS 全栈模式配置文件
+# 版本: 1.0
+# 说明: 定义工程师角色、项目绑定和服务依赖关系
+
+version: "1.0"
+mode: fullstack
+
+# ============================================================
+# 工程师定义
+# 每个工程师可以负责多个项目，按职能+技术栈分类
+# ============================================================
+engineers:
+  # -------------------- 前端工程师 --------------------
+  - id: fe-react-main
+    type: frontend-react
+    name: "React 前端工程师"
+    projects:
+      - path: "./frontend/web-app"
+        description: "React 用户端应用"
+        tech_stack: [react@18, typescript, zustand]
+        auto_init_kb: true
+
+  - id: fe-vue-admin
+    type: frontend-vue
+    name: "Vue 前端工程师"
+    projects:
+      - path: "./frontend/admin"
+        description: "Vue 后台管理系统"
+        tech_stack: [vue@3, typescript, pinia]
+        auto_init_kb: true
+
+  # -------------------- 后端工程师 --------------------
+  - id: be-java-core
+    type: backend-java
+    name: "Java 核心服务工程师"
+    projects:
+      - path: "./backend/user-service"
+        description: "用户服务"
+        tech_stack: [spring-boot@3, mybatis-plus, mysql]
+        auto_init_kb: true
+      - path: "./backend/order-service"
+        description: "订单服务"
+        tech_stack: [spring-boot@3, mybatis-plus, mysql]
+        auto_init_kb: true
+
+  - id: be-python-data
+    type: backend-python
+    name: "Python 数据服务工程师"
+    projects:
+      - path: "./backend/data-service"
+        description: "数据处理服务"
+        tech_stack: [fastapi, sqlalchemy, postgresql]
+        auto_init_kb: true
+
+  - id: be-go-gateway
+    type: backend-go
+    name: "Go 网关工程师"
+    projects:
+      - path: "./backend/api-gateway"
+        description: "API 网关"
+        tech_stack: [gin, redis, etcd]
+        auto_init_kb: true
+
+  - id: be-node-bff
+    type: backend-nodejs
+    name: "Node.js BFF 工程师"
+    projects:
+      - path: "./backend/bff"
+        description: "BFF 层"
+        tech_stack: [nestjs, graphql, typescript]
+        auto_init_kb: true
+
+  # -------------------- 移动端工程师 --------------------
+  - id: mobile-ios-main
+    type: mobile-ios
+    name: "iOS 工程师"
+    projects:
+      - path: "./mobile/ios"
+        description: "iOS 原生应用"
+        tech_stack: [swift@5.9, swiftui]
+        auto_init_kb: true
+
+  - id: mobile-android-main
+    type: mobile-android
+    name: "Android 工程师"
+    projects:
+      - path: "./mobile/android"
+        description: "Android 原生应用"
+        tech_stack: [kotlin, jetpack-compose]
+        auto_init_kb: true
+
+  - id: mobile-harmony-main
+    type: mobile-harmony
+    name: "鸿蒙工程师"
+    projects:
+      - path: "./mobile/harmony"
+        description: "鸿蒙应用"
+        tech_stack: [arkts, arkui]
+        auto_init_kb: true
+
+# ============================================================
+# 服务间依赖关系
+# 用于智能任务分配和执行顺序计算
+# ============================================================
+service_dependencies:
+  # 前端依赖 BFF 和网关
+  "./frontend/web-app":
+    depends_on: ["./backend/bff", "./backend/api-gateway"]
+  "./frontend/admin":
+    depends_on: ["./backend/bff", "./backend/api-gateway"]
+
+  # BFF 依赖各后端服务
+  "./backend/bff":
+    depends_on:
+      - "./backend/user-service"
+      - "./backend/order-service"
+      - "./backend/data-service"
+
+  # 网关依赖核心服务
+  "./backend/api-gateway":
+    depends_on:
+      - "./backend/user-service"
+      - "./backend/order-service"
+
+  # 服务间依赖
+  "./backend/order-service":
+    depends_on: ["./backend/user-service"]
+
+  # 移动端依赖网关
+  "./mobile/ios":
+    depends_on: ["./backend/api-gateway"]
+  "./mobile/android":
+    depends_on: ["./backend/api-gateway"]
+  "./mobile/harmony":
+    depends_on: ["./backend/api-gateway"]
+
+# ============================================================
+# 主代理（Orchestrator）配置
+# ============================================================
+orchestrator:
+  # 后端技术文档自动同步给依赖方
+  auto_sync_tech_docs: true
+
+  # 允许多工程师并行执行
+  parallel_execution: true
+
+  # 后端优先（先完成 API 契约）
+  backend_first: true
+
+  # 最大并行工程师数
+  max_parallel_engineers: 4
+
+  # 项目知识库自动初始化
+  auto_init_project_kb: true
+
+  # 跨服务影响分析
+  cross_service_analysis: true
+
+# ============================================================
+# 技术文档模板
+# ============================================================
+tech_doc_templates:
+  api_contract: "templates/api_contract.md"
+  database_design: "templates/database_design.md"
+  architecture: "templates/architecture.md"
