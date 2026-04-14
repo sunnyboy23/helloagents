@@ -11,12 +11,13 @@ import json
 import sys
 
 from fullstack_task_manager import TaskManager
+from fullstack_task_manager import resolve_state_file_arg
 
 
 def main() -> None:
     """CLI 入口。"""
     if len(sys.argv) < 3:
-        print("Usage: fullstack_state.py <state_file> <command> [args...]", file=sys.stderr)
+        print("Usage: fullstack_state.py <state_file|@auto> <command> [args...]", file=sys.stderr)
         print("Commands:", file=sys.stderr)
         print("  get                            - 读取完整状态", file=sys.stderr)
         print("  summary                        - 读取状态摘要", file=sys.stderr)
@@ -24,7 +25,7 @@ def main() -> None:
         print("  update <task_id> <status> <result_json> - 更新任务状态", file=sys.stderr)
         sys.exit(1)
 
-    state_file = sys.argv[1]
+    state_file = resolve_state_file_arg(sys.argv[1])
     command = sys.argv[2]
     manager = TaskManager(state_file)
 
@@ -60,4 +61,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

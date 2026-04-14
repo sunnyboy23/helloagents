@@ -374,6 +374,10 @@ Customize workflow behavior via `~/.helloagents/helloagents.json` after installa
 | `UPDATE_CHECK` | int | `72` | Update check cache TTL in hours: `0`=OFF |
 | `CSV_BATCH_MAX` | int | `16` | CSV batch max concurrency: `0`=OFF, cap 64 (Codex CLI only) |
 | `notify_level` | int | `0` | Notification mode: `0`=OFF, `1`=desktop, `2`=sound, `3`=desktop+sound |
+| `FULLSTACK_ROOT_MODE` | string | `""` | First-time fullstack folder placement policy. `project` = keep `fullstack` under the current project, `global` = keep it under the user-level global root |
+| `FULLSTACK_RUNTIME_ROOT` | string | `""` | Unified fullstack global root. Task state files go to `{root}/{project_hash}/fullstack/tasks`; config/index default to `{root}/config` and `{root}/index`. Empty = legacy project-local fallback |
+| `FULLSTACK_CONFIG_ROOT` | string | `""` | Override fullstack global config root explicitly. Empty = derive from `FULLSTACK_RUNTIME_ROOT` or use `~/.helloagents/fullstack/config` |
+| `FULLSTACK_INDEX_ROOT` | string | `""` | Override fullstack global index root explicitly. Empty = derive from `FULLSTACK_RUNTIME_ROOT` or use `~/.helloagents/fullstack/index` |
 
 **Example:**
 

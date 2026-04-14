@@ -2,7 +2,29 @@
 
 ## [Unreleased]
 
+### 新增
+- **[fullstack-share]**: 参考完整说明文档深化全栈模式分享演示稿，在保持流程主线不变的前提下补充关键脚本职责、函数映射和代码阅读路径，升级为“流程 + 实现”双视角分享 — by wangdongcheng
+  - 方案: [202604141406_fullstack-share-detail-refresh](archive/2026-04/202604141406_fullstack-share-detail-refresh/)
+  - 决策: fullstack-share-detail-refresh#D001(保持流程主线不变，按源码映射层增强关键页面)
+- **[fullstack-share]**: 重构全栈模式分享演示稿，改为机制拆解型技术分享，重写视觉系统、页级叙事、讲稿与提纲，并移除案例页聚焦系统机制 — by wangdongcheng
+  - 方案: [202604132037_fullstack-share-redesign](archive/2026-04/202604132037_fullstack-share-redesign/)
+  - 决策: fullstack-share-redesign#D001(采用机制拆解型结构替换介绍型叙事)
+
 ### 快速修改
+- **[gitignore]**: 更新 `.gitignore`，新增 `docs/` 与 `tests/` 目录忽略规则，避免本地文档与测试目录默认进入待提交列表 `[类型: 配置]` — by Codex
+  - 文件: `.gitignore`
+- **[fullstack-share-ppt]**: 收紧全栈模式分享 PPT 的单页版式约束，并将主体展示区改为顶部对齐，避免内容区域整体偏下且需要上下滚动 `[类型: 样式]` — by Codex
+  - 文件: `docs/fullstack-mode-share/styles.css`
+- **[project-kb-facts]**: 重构项目知识库生成逻辑，改为以 README/AGENTS/构建配置/目录结构等真实仓库事实驱动生成 `context.md` 与 `guidelines.md`，减少模板虚构内容，并补强 Java 多模块与前端样式体系识别 `[类型: 脚本+测试]` — by Codex
+  - 文件: `helloagents/scripts/fullstack_init_project_kb.py`, `tests/test_fullstack_init_project_kb.py`
+- **[fullstack-init-bridge]**: 打通真实 `helloagents fullstack init/bind/kb init --all` 命令桥接，并修正 `project` 模式下仍误取全局 `fullstack.yaml` 的优先级问题，确保初始化位置严格遵循根目录选择 `[类型: 脚本+测试]` — by Codex
+  - 文件: `helloagents/core/fullstack_runtime_cmd.py`, `helloagents/scripts/fullstack_runtime.py`, `helloagents/scripts/fullstack_config.py`, `tests/test_fullstack_runtime.py`
+- **[fullstack-root-choice]**: 为全栈 `fullstack` 文件夹新增首次位置选择与持久化模式（项目内 / 用户目录），避免初始化时默认落到当前项目目录 `[类型: 脚本+文档]` — by wangdongcheng
+  - 文件: `helloagents/scripts/fullstack_runtime.py`, `helloagents/core/fullstack_runtime_cmd.py`, `helloagents/core/dispatcher.py`, `helloagents/_common.py`, `helloagents/scripts/_config.py`, `tests/test_fullstack_runtime.py`, `docs/fullstack-mode-guide.md`, `helloagents/functions/fullstack.md`, `README.md`, `README_CN.md`, `AGENTS.md`
+- **[fullstack-kb]**: 增强 `~fullstack kb init --all`，支持修复半成品项目 KB、保留原有任务与归档记录，并为每个项目生成工程师独立会话的补全文档任务 `[类型: 脚本+文档]` — by wangdongcheng
+  - 文件: `helloagents/scripts/fullstack_init_project_kb.py`, `helloagents/scripts/fullstack_config.py`, `tests/test_fullstack_init_project_kb.py`, `helloagents/functions/fullstack.md`, `docs/fullstack-mode-guide.md`, `docs/fullstack-mode-design.md`, `docs/helloagents-message-flow-code-level.md`, `.helloagents/modules/scripts.md`
+- **[fullstack-runtime]**: 统一 `FULLSTACK_RUNTIME_ROOT` 语义，设置后默认同步派生全局配置目录与索引目录，避免 `~fullstack init` 与运行态路径分离 `[类型: 脚本+文档]` — by wangdongcheng
+  - 文件: `helloagents/scripts/fullstack_runtime.py`, `helloagents/core/fullstack_runtime_cmd.py`, `helloagents/_common.py`, `helloagents/scripts/_config.py`, `tests/test_fullstack_runtime.py`, `helloagents/functions/fullstack.md`, `docs/fullstack-mode-guide.md`, `docs/fullstack-mode-design.md`, `docs/helloagents-message-flow-code-level.md`, `README.md`, `README_CN.md`, `AGENTS.md`
 - **[fullstack-agent]**: 补齐 Go/Node.js/Vue 工程师角色与 Agent 映射，修正 Node.js 命名一致性（新增 backend_go.md、backend_nodejs.md、frontend_vue.md、ha-backend-go.md、ha-backend-nodejs.md；更新 orchestrator/fullstack 映射与任务进度） `[类型: 文档+规则]`
   - 文件: `helloagents/rlm/roles/backend_go.md`, `helloagents/rlm/roles/backend_nodejs.md`, `helloagents/rlm/roles/frontend_vue.md`, `helloagents/agents/ha-backend-go.md`, `helloagents/agents/ha-backend-nodejs.md`, `helloagents/agents/ha-orchestrator.md`, `helloagents/functions/fullstack.md`, `.helloagents/plan/202603241500_fullstack-mode/tasks.md`
 - **[fullstack-agent]**: 清理重复 Node.js Agent 文件，移除历史命名 `ha-backend-node.md`，统一使用 `ha-backend-nodejs.md` `[类型: 文档+规则]`

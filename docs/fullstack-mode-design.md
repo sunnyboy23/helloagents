@@ -35,9 +35,13 @@
 
 ### 2.1 系统边界
 
-- 输入：用户需求、`fullstack.yaml` 配置、项目代码与文档
+- 输入：用户需求、`fullstack.yaml` 配置（支持全局优先、项目内兜底）、项目代码与文档
 - 输出：任务拆解结果、执行进度、变更与技术文档同步结果
-- 存储：项目内 `.helloagents/fullstack/`、任务状态 JSON、各项目 `.helloagents/`
+- 存储：
+  - 项目级：各项目 `.helloagents/`（项目知识库与项目任务）
+  - 全局优先：`~/.helloagents/fullstack/config/fullstack.yaml`、`~/.helloagents/fullstack/index/*`
+  - 兼容兜底：`{KB_ROOT}/fullstack/fullstack.yaml`
+  - 显式设置 `FULLSTACK_RUNTIME_ROOT` 时：配置/索引/运行态统一落在该根目录下，其中任务状态为 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/*`
 
 ### 2.2 设计原则
 
@@ -115,7 +119,9 @@ flowchart TB
 
 - 检查目标项目 `.helloagents` 是否存在
 - 合并 declared + detected 技术栈
-- 选择模板并生成项目 KB 初始结构
+- 选择模板并生成/修复项目 KB 初始结构
+- 识别“只有历史记录、缺少项目文档”的半成品 KB，保留历史数据并补齐核心知识文档
+- 为每个项目生成一个面向对应工程师的独立会话补全文档任务
 
 ### 4.6 文档同步器（`fullstack_sync.py`）
 

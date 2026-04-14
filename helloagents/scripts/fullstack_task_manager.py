@@ -565,10 +565,33 @@ class TaskManager:
         return None
 
 
+def resolve_state_file_arg(state_file_arg: str) -> str:
+    """Resolve state file path.
+
+    - Normal path: return as-is
+    - @auto: resolve via fullstack_runtime.py using cwd-derived project/kb roots
+    """
+    if state_file_arg != "@auto":
+        return state_file_arg
+
+    project_root = os.environ.get("HELLOAGENTS_PROJECT_ROOT", str(Path.cwd()))
+    kb_root = os.environ.get("HELLOAGENTS_KB_ROOT", str(Path.cwd() / ".helloagents"))
+
+    try:
+        from fullstack_runtime import get_current_state_file, ensure_runtime_dirs
+
+        ensure_runtime_dirs(project_root=project_root, kb_root=kb_root)
+        return str(get_current_state_file(project_root=project_root, kb_root=kb_root))
+    except Exception:
+        fallback = Path(kb_root) / "fullstack" / "tasks"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return str(fallback / "current.json")
+
+
 def main():
     """CLI 入口"""
     if len(sys.argv) < 3:
-        print("Usage: fullstack_task_manager.py <state_file> <command> [args...]", file=sys.stderr)
+        print("Usage: fullstack_task_manager.py <state_file|@auto> <command> [args...]", file=sys.stderr)
         print("Commands:", file=sys.stderr)
         print("  create <tasks_json>     - Create task group from JSON file", file=sys.stderr)
         print("  status                  - Get status summary", file=sys.stderr)
@@ -581,7 +604,7 @@ def main():
         print("  report                  - Get progress report", file=sys.stderr)
         sys.exit(1)
 
-    state_file = sys.argv[1]
+    state_file = resolve_state_file_arg(sys.argv[1])
     command = sys.argv[2]
 
     manager = TaskManager(state_file)

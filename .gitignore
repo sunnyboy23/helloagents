@@ -39,3 +39,7 @@ COMMIT_MESSAGE.md
 nul
 完整设计提示词.txt
 /.helloagents
+
+# Local-only docs and tests
+/docs/
+/tests/

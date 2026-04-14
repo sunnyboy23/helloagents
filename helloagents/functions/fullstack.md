@@ -54,6 +54,30 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstac
 - directly_affected: 直接受影响的项目
 - all_affected: 所有受影响的项目（含级联）
 - execution_order: 拓扑排序后的执行层级
+- dispatch_plan.dispatchable_projects: 已绑定工程师、可派发的项目
+- dispatch_plan.unassigned_projects: 未绑定工程师的项目（仅告警并跳过，不阻断）
+- dispatch_plan.grouped_by_engineer_type: 按职能工程师类型分组的可派发项目
+- dispatch_plan.continue_execution: 是否继续执行（有可派发项目即 true）
+- dispatch_plan.warnings: 非阻断告警（含补绑建议）
+
+### ~fullstack dispatch-plan
+
+按“当前已绑定的工程师与项目”生成派发计划（仅派发给存在的职能工程师）:
+
+```bash
+~fullstack dispatch-plan '{受影响项目路径1}' '{受影响项目路径2}'
+```
+
+输出:
+
+```yaml
+dispatchable_projects: 可派发项目（有绑定工程师）
+unassigned_projects: 未绑定项目（不派发，仅提示补绑定，非阻断）
+grouped_by_engineer_type: 可派发项目按职能类型分组
+dispatch_execution_order: 仅对可派发项目做 DAG 层级
+continue_execution: 有可派发项目时继续执行
+warnings: 非阻断告警与补绑建议
+```
 
 ### 4. 任务拆解
 
@@ -147,9 +171,28 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_init_project_kb.py' '{项目路径}' --t
 初始化全栈模式配置:
 
 ```bash
-# 创建配置目录和模板文件
+# 未设置全局根目录时，创建 legacy 项目内目录与模板文件
 mkdir -p {KB_ROOT}/fullstack/tasks
 cp {TEMPLATES_DIR}/fullstack.yaml {KB_ROOT}/fullstack/fullstack.yaml
+
+# 已设置 ~fullstack runtime set-root 时，默认改为使用统一全局根目录
+# FULLSTACK_RUNTIME_ROOT/config/fullstack.yaml
+# FULLSTACK_RUNTIME_ROOT/index/*
+# FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/*
+```
+
+说明:
+
+- 若配置 `FULLSTACK_RUNTIME_ROOT`，它将作为统一的全局 fullstack 根目录：
+  - 任务状态文件写入 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks`
+  - `fullstack.yaml` 默认写入 `FULLSTACK_RUNTIME_ROOT/config/fullstack.yaml`
+  - 迁移索引默认写入 `FULLSTACK_RUNTIME_ROOT/index/`
+- 未配置时，继续使用 legacy 项目内路径
+- 可在 `init` 前通过命令设置运行态根目录：
+
+```bash
+~fullstack runtime set-root '~/.helloagents/runtime'
+~fullstack runtime get-root
 ```
 
 ### ~fullstack status
@@ -157,7 +200,13 @@ cp {TEMPLATES_DIR}/fullstack.yaml {KB_ROOT}/fullstack/fullstack.yaml
 查看当前任务状态:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '{KB_ROOT}/fullstack/tasks/current.json' status
+~fullstack status
+```
+
+可选环境变量（覆盖默认 cwd 推断）:
+
+```bash
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' status
 ```
 
 ### ~fullstack projects
@@ -165,16 +214,15 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '{KB_ROOT}/fullstack/ta
 查看项目与工程师绑定关系:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' projects
+~fullstack projects
 ```
 
 ### ~fullstack bind
 
-绑定项目到工程师（手动编辑配置后验证）:
+绑定项目到工程师（支持绝对路径和跨目录项目）:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' validate
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' detect-engineer '{项目路径}'
+~fullstack bind '{项目绝对路径}' --engineer-id '{工程师ID}' --allow-rebind
 ```
 
 ### ~fullstack sync
@@ -182,16 +230,15 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstac
 手动触发技术文档同步:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_sync.py' sync '{源文档路径}' '{目标项目路径1,目标项目路径2}' --type api_contract
+~fullstack sync '{源文档路径}' '{目标项目路径1,目标项目路径2}' --type api_contract
 ```
 
 ### ~fullstack unbind
 
-解绑项目（移除绑定后验证配置）:
+解绑项目（移除绑定并保存配置）:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' validate
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' projects
+~fullstack unbind '{项目绝对路径}'
 ```
 
 ### ~fullstack engineers
@@ -199,8 +246,56 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstac
 查看工程师能力与项目分配概览:
 
 ```bash
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' projects
+~fullstack engineers
 ```
+
+### ~fullstack bind wizard
+
+向导式绑定（推荐首次使用）:
+
+```bash
+~fullstack bind wizard
+```
+
+交互流程:
+
+```yaml
+1. 选择工程师类型（backend-java / frontend-react 等）
+2. 输入工程师ID（可自动生成）
+3. 输入多个项目绝对路径（逐行输入，空行结束）
+4. 选择是否允许重绑定迁移（--allow-rebind）
+5. 确认后写入 fullstack.yaml
+```
+
+### ~fullstack kb init --all
+
+批量初始化所有已绑定项目 KB:
+
+```bash
+~fullstack kb init --all
+```
+
+行为补充:
+
+- 若项目不存在 `.helloagents/`，创建项目 KB 骨架并注入自动扫描摘要
+- 若项目已存在 `.helloagents/` 但只有 `plan/archive/CHANGELOG` 等历史记录、缺少项目级文档，则保留历史记录并补齐核心知识文档
+- 会为每个项目生成一个面向对应工程师的独立会话补全文档任务，避免多个项目共用同一上下文
+
+### ~fullstack runtime set-root/get-root/clear-root
+
+在聊天命令中设置/查看/清理统一的全局 fullstack 根目录（支持在 `~fullstack init` 前执行）:
+
+```bash
+~fullstack runtime choose-root
+~fullstack runtime set-root '~/.helloagents/runtime'
+~fullstack runtime get-root
+~fullstack runtime clear-root
+```
+
+说明:
+
+- `choose-root`：首次初始化前先选择 `fullstack` 文件夹放在项目内还是用户目录，并将选择写入全局配置
+- 选择 `global` 后，再通过 `set-root` 可进一步指定具体用户目录路径
 
 ### ~fullstack resume
 

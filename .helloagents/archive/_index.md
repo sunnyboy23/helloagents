@@ -7,6 +7,8 @@
 
 | 时间戳 | 名称 | 类型 | 涉及模块 | 决策 | 结果 |
 |--------|------|------|---------|------|------|
+| 202604141406 | fullstack-share-detail-refresh | - | - | - | ✅完成 |
+| 202604132037 | fullstack-share-redesign | - | - | - | ✅完成 |
 | 202603201905 | kb-bootstrap | implementation | knowledge-base | kb-bootstrap#D001 | ✅完成 |
 
 ## 按月归档

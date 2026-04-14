@@ -23,6 +23,10 @@ VALID_CONFIG_KEYS: dict[str, int | str] = {
     "UPDATE_CHECK": 72,
     "CSV_BATCH_MAX": 16,
     "NOTIFY_LEVEL": 0,
+    "FULLSTACK_ROOT_MODE": "",
+    "FULLSTACK_RUNTIME_ROOT": "",
+    "FULLSTACK_CONFIG_ROOT": "",
+    "FULLSTACK_INDEX_ROOT": "",
 }
 
 # Legacy alias: notify_level → NOTIFY_LEVEL (backward compatibility)

@@ -135,6 +135,10 @@ def print_usage() -> None:
                "  helloagents status              Show installation status"))
     print(_msg("  helloagents version             查看版本（--force 跳过缓存，--cache-ttl N 设置缓存小时数）",
                "  helloagents version             Show version (--force skip cache, --cache-ttl N set cache hours)"))
+    print(_msg("  helloagents fullstack runtime <choose-root|get-mode|set-root|get-root|clear-root> [path]",
+               "  helloagents fullstack runtime <choose-root|get-mode|set-root|get-root|clear-root> [path]"))
+    print(_msg("  helloagents fullstack migrate <--dry-run|--to-global|--rollback> [project_root] [kb_root]",
+               "  helloagents fullstack migrate <--dry-run|--to-global|--rollback> [project_root] [kb_root]"))
     print()
     print(_msg("目标:", "Targets:"))
     for name in CLI_TARGETS:
@@ -241,6 +245,11 @@ def dispatch(args: list[str]) -> None:
         status()
     elif cmd == "version":
         pass  # already handled by check_update(show_version=True)
+    elif cmd == "fullstack":
+        from .fullstack_runtime_cmd import handle_fullstack_runtime_cli
+        ok = handle_fullstack_runtime_cli(args[1:])
+        if not ok:
+            sys.exit(1)
     else:
         print(_msg(f"未知命令: {cmd}", f"Unknown command: {cmd}"))
         print_usage()

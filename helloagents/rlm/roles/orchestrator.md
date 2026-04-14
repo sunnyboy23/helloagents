@@ -78,7 +78,7 @@
   3. 按 orchestrator.backend_first 调整优先级
   3.1 同一工程师的多项目任务分组（按工程师 ID 聚合）
   3.2 组内按项目依赖拓扑排序，构建项目切换上下文
-  4. 生成任务列表写入 fullstack/tasks/
+  4. 生成任务列表写入运行态任务目录（默认 fullstack/tasks/，可由 FULLSTACK_RUNTIME_ROOT 重定向）
 输出: 任务列表（含 DAG）
 ```
 
