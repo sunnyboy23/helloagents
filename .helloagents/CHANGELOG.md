@@ -11,6 +11,8 @@
   - 决策: fullstack-share-redesign#D001(采用机制拆解型结构替换介绍型叙事)
 
 ### 快速修改
+- **[fullstack-share-ppt]**: 重写全栈模式分享演示稿，改为“以 fullstack 为主、非全栈为参照”的对比增强版，补充关键能力代码摘录与 X-Ray 实践案例，并同步更新提纲/讲稿/说明文件 `[类型: 文档+前端]` — by Codex
+  - 文件: `docs/fullstack-mode-share/app.js`, `docs/fullstack-mode-share/styles.css`, `docs/fullstack-mode-share/outline.md`, `docs/fullstack-mode-share/speaker-notes.md`, `docs/fullstack-mode-share/README.md`
 - **[gitignore]**: 更新 `.gitignore`，新增 `docs/` 与 `tests/` 目录忽略规则，避免本地文档与测试目录默认进入待提交列表 `[类型: 配置]` — by Codex
   - 文件: `.gitignore`
 - **[fullstack-share-ppt]**: 收紧全栈模式分享 PPT 的单页版式约束，并将主体展示区改为顶部对齐，避免内容区域整体偏下且需要上下滚动 `[类型: 样式]` — by Codex
@@ -41,6 +43,8 @@
 ## [2.3.0] - 2026-03-20
 
 ### 新增
+- **[xray-fullstack-plan]**: 输出雅典娜 / 质检大脑 / athenaweb 的 X-ray 跨项目技术方案与任务拆分，覆盖多质检码输入、历史拍照、漏检提交、风险商户+风险机型+购买渠道推送规则 `[类型: 方案包]` — by Codex
+  - 方案: [202604151530_xray-fullstack-plan](plan/202604151530_xray-fullstack-plan/)
 - **[knowledge-base]**: 初始化项目知识库与模块文档基线 — by wangdongcheng
   - 方案: [202603201905_kb-bootstrap](archive/2026-03/202603201905_kb-bootstrap/)
   - 决策: kb-bootstrap#D001(模块按仓库结构划分)

@@ -7,8 +7,8 @@
 2. 全局配置 ~/.helloagents/helloagents.json 中 FULLSTACK_RUNTIME_ROOT
 3. 回退到项目知识库目录 {KB_ROOT}/fullstack/tasks
 
-当使用 1/2（用户目录）时，按项目路径哈希隔离：
-{FULLSTACK_RUNTIME_ROOT}/{project_hash}/fullstack/tasks/current.json
+当使用 1/2（用户目录）时，按项目根路径稳定哈希隔离：
+{FULLSTACK_RUNTIME_ROOT}/{project_runtime_key}/fullstack/tasks/current.json
 
 全栈配置路径策略（双路径兼容）：
 1. 环境变量 HELLOAGENTS_FULLSTACK_CONFIG_ROOT（最高优先级）
@@ -76,6 +76,11 @@ def _select_default_global_root() -> Path:
 def _project_hash(project_root: Path) -> str:
     digest = hashlib.sha1(str(project_root).encode("utf-8")).hexdigest()
     return digest[:12]
+
+
+def get_project_runtime_key(project_root: Path) -> str:
+    """Return stable project-level runtime key derived from absolute path."""
+    return _project_hash(project_root)
 
 
 def _get_configured_runtime_root() -> Path | None:
@@ -171,8 +176,8 @@ def get_runtime_root(kb_root: str, project_root: str) -> Path:
     if runtime_root is None:
         return _normalize_path(kb_root) / "fullstack" / "tasks"
 
-    project_hash = _project_hash(_normalize_path(project_root))
-    return runtime_root / project_hash / "fullstack" / "tasks"
+    project_runtime_key = get_project_runtime_key(_normalize_path(project_root))
+    return runtime_root / project_runtime_key / "fullstack" / "tasks"
 
 
 def get_config_root() -> Path:

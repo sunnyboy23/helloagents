@@ -78,7 +78,13 @@
   3. 按 orchestrator.backend_first 调整优先级
   3.1 同一工程师的多项目任务分组（按工程师 ID 聚合）
   3.2 组内按项目依赖拓扑排序，构建项目切换上下文
-  4. 生成任务列表写入运行态任务目录（默认 fullstack/tasks/，可由 FULLSTACK_RUNTIME_ROOT 重定向）
+  4. 先生成 tasks_json，再调用 `fullstack_task_manager.py '@auto' create {tasks_json}` 强制创建运行态 current.json
+     - tasks_json 必须包含任务组级 `required_artifacts`：
+       - fullstack/docs/tasks.md
+       - fullstack/docs/agents.md
+       - fullstack/docs/upstream.md
+     - 后端接口/数据模型/跨服务依赖变更任务的 `task_contract.required_artifacts` 必须补 `.helloagents/docs/{feature}_technical_solution.md`
+  5. 生成任务列表写入运行态任务目录（默认 fullstack/tasks/，可由 FULLSTACK_RUNTIME_ROOT 重定向）
 输出: 任务列表（含 DAG）
 ```
 
@@ -103,6 +109,7 @@
   2. 从 Layer 1 开始：
      - 同层任务并发派发（≤6 并发）
      - 构造 TaskMessage（含 role_activation）
+     - 每个任务派发前调用 `fullstack_task_manager.py '@auto' start {task_id}`
      - 调用 Task 工具派发给工程师子代理
   3. 等待同层全部完成
   4. 处理返回的 ResultMessage
@@ -110,6 +117,12 @@
   6. 通过 fullstack_task_manager.py report 输出实时进度
 输出: 执行结果
 ```
+
+运行态要求：
+
+- 所有状态命令统一使用 `@auto`
+- `@auto` 优先写入 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/current.json`
+- 禁止在协议中再硬编码 `'{KB_ROOT}/fullstack/tasks/current.json'`
 
 ### 5. 结果汇总
 
@@ -120,6 +133,7 @@
   2. 收集问题（issues）
   3. 同步技术文档（tech_docs → 下游项目）
   4. 更新全局进度
+  5. 检查 artifact_status.missing，缺失时不得把任务组标为可收尾
 输出: 执行报告
 ```
 

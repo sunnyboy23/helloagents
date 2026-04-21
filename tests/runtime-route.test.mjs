@@ -54,6 +54,23 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
     env,
+    input: JSON.stringify({ cwd: project, prompt: '~fullstack status' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]fullstack[\\/]SKILL\.md/)
+
+  result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: '~fs status' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]fullstack[\\/]SKILL\.md/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /兼容别名映射：本次按 ~fullstack 规则执行/)
+
+  result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
     input: JSON.stringify({ cwd: project, prompt: 'create a new app for expenses' }),
   })
   payload = parseStdoutJson(result)

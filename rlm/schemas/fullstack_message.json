@@ -165,7 +165,7 @@
           "items": {
             "type": "object",
             "properties": {
-              "type": { "type": "string", "enum": ["api_contract", "database_design", "architecture"] },
+              "type": { "type": "string", "enum": ["api_contract", "database_design", "architecture", "technical_solution"] },
               "path": { "type": "string" },
               "sync_to": {
                 "type": "array",

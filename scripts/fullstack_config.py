@@ -4,7 +4,7 @@
 全栈模式配置文件解析器
 
 解析 .helloagents/fullstack.yaml 配置文件，
-支持新格式：engineers + service_dependencies
+支持新格式：engineers + service_dependencies + service_catalog
 """
 
 import json
@@ -89,6 +89,7 @@ def build_default_fullstack_config() -> Dict[str, Any]:
         "mode": "fullstack",
         "engineers": engineers,
         "service_dependencies": {},
+        "service_catalog": {},
         "orchestrator": {
             "auto_sync_tech_docs": True,
             "parallel_execution": True,
@@ -101,6 +102,10 @@ def build_default_fullstack_config() -> Dict[str, Any]:
             "api_contract": "templates/api_contract.md",
             "database_design": "templates/database_design.md",
             "architecture": "templates/architecture.md",
+            "technical_solution": "templates/technical_solution.md",
+            "task_breakdown": "templates/fullstack_tasks.md",
+            "agent_assignment": "templates/fullstack_agents.md",
+            "upstream_index": "templates/fullstack_upstream.md",
         },
     }
 
@@ -425,7 +430,33 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
             elif not isinstance(engineer["projects"], list):
                 errors.append(f"Engineer {i}: 'projects' must be a list")
 
+    service_catalog = config.get("service_catalog", {})
+    if service_catalog and not isinstance(service_catalog, dict):
+        errors.append("Field 'service_catalog' must be a mapping")
+    elif isinstance(service_catalog, dict):
+        for project_path, profile in service_catalog.items():
+            if not isinstance(profile, dict):
+                errors.append(f"service_catalog[{project_path}] must be an object")
+                continue
+            if "service_summary" in profile and not isinstance(profile.get("service_summary"), str):
+                errors.append(f"service_catalog[{project_path}].service_summary must be a string")
+            if "business_scope" in profile and not isinstance(profile.get("business_scope"), list):
+                errors.append(f"service_catalog[{project_path}].business_scope must be a list")
+            architecture = profile.get("architecture")
+            if architecture is not None and not isinstance(architecture, dict):
+                errors.append(f"service_catalog[{project_path}].architecture must be an object")
+
     return len(errors) == 0, errors
+
+
+def get_service_profile(config: Dict[str, Any], project_path: str) -> Dict[str, Any]:
+    """Return declared service profile for a project."""
+    target = normalize_project_path(project_path)
+    catalog = config.get("service_catalog", {}) or {}
+    for path, profile in catalog.items():
+        if normalize_project_path(path) == target:
+            return profile if isinstance(profile, dict) else {}
+    return {}
 
 
 def normalize_project_path(project_path: str) -> str:
@@ -959,12 +990,14 @@ def build_dispatch_plan(config: Dict[str, Any], projects: List[str], deps: Dict[
             continue
 
         engineer_type = engineer.get("type")
+        task_contract = _build_task_contract(config, project, deps, engineer)
         assignments.append({
             "project": project,
             "dispatchable": True,
             "engineer_id": engineer.get("id"),
             "engineer_type": engineer_type,
             "engineer_name": engineer.get("name"),
+            "task_contract": task_contract,
         })
         dispatchable_projects.append(project)
         grouped_by_engineer_type.setdefault(engineer_type or "unknown", []).append(project)
@@ -994,6 +1027,63 @@ def build_dispatch_plan(config: Dict[str, Any], projects: List[str], deps: Dict[
         "continue_execution": len(dispatchable_projects) > 0,
         "advisory_only_unassigned": True,
         "warnings": warnings,
+    }
+
+
+def _build_task_contract(
+    config: Dict[str, Any],
+    project: str,
+    deps: Dict[str, Any],
+    engineer: Dict[str, Any],
+) -> Dict[str, Any]:
+    """为可派发项目生成轻量任务契约。"""
+    upstream_projects = [
+        dep for dep in deps.get(project, {}).get("depends_on", []) if dep
+    ]
+    downstream_projects = get_downstream_projects(config, project)
+    engineer_type = str(engineer.get("type") or "unknown")
+
+    risk_level = "medium"
+    verify_mode = "standard"
+    if upstream_projects or downstream_projects:
+        risk_level = "high"
+        verify_mode = "cross_project"
+    if engineer_type.startswith("backend-") and downstream_projects:
+        risk_level = "high"
+        verify_mode = "api_contract_required"
+    elif engineer_type.startswith("mobile-"):
+        verify_mode = "integration_ready"
+
+    reviewer_focus = ["依赖影响是否完整", "接口/文档是否同步", "是否满足上游前置条件"]
+    tester_focus = ["关键路径可验证", "上下游联调风险已覆盖"]
+    deliverables = ["代码变更摘要", "验证结果摘要"]
+
+    if engineer_type.startswith("backend-"):
+        reviewer_focus.insert(0, "接口兼容性与下游影响")
+        tester_focus.append("接口变更与回归验证")
+        deliverables.append("API/技术文档同步项")
+    elif engineer_type.startswith("frontend-"):
+        reviewer_focus.insert(0, "页面/交互是否适配上游契约")
+        tester_focus.append("页面联调与回归验证")
+        deliverables.append("页面适配说明")
+    elif engineer_type.startswith("mobile-"):
+        reviewer_focus.insert(0, "端上集成与发布约束")
+        tester_focus.append("真机/集成验证说明")
+        deliverables.append("端上集成说明")
+
+    upstream_contracts = [
+        f"{upstream}/.helloagents/api/upstream" for upstream in upstream_projects
+    ]
+
+    return {
+        "verify_mode": verify_mode,
+        "risk_level": risk_level,
+        "reviewer_focus": reviewer_focus,
+        "tester_focus": tester_focus,
+        "deliverables": deliverables,
+        "upstream_projects": upstream_projects,
+        "downstream_projects": downstream_projects,
+        "upstream_contracts": upstream_contracts,
     }
 
 
@@ -1073,6 +1163,47 @@ def analyze_impact(config: Dict[str, Any], affected_projects: List[str]) -> Dict
         "all_affected": all_affected_list,
         "execution_order": execution_order,
         "dispatch_plan": dispatch_plan,
+    }
+
+
+def analyze_service_ownership(config: Dict[str, Any], requirement: str, candidate_projects: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Analyze owner service based on user-declared service catalog."""
+    catalog = config.get("service_catalog", {}) or {}
+    projects = candidate_projects or list(catalog.keys()) or [item["path"] for item in get_all_projects(config)]
+    requirement_lower = str(requirement or "").lower()
+    scored: List[Dict[str, Any]] = []
+    for project in projects:
+        profile = get_service_profile(config, project)
+        reasons: List[str] = []
+        score = 0
+        haystacks: List[str] = []
+        haystacks.extend(profile.get("owned_capabilities", []) or [])
+        haystacks.extend(profile.get("business_scope", []) or [])
+        haystacks.append(profile.get("service_summary", ""))
+        architecture = profile.get("architecture", {}) or {}
+        haystacks.extend(architecture.get("entrypoints", []) or [])
+        haystacks.extend(architecture.get("key_modules", []) or [])
+        for item in haystacks:
+            text = str(item).strip().lower()
+            if text and text in requirement_lower:
+                score += 3
+                reasons.append(f"命中声明字段: {item}")
+        if profile.get("service_type") in {"domain", "workflow"} and any(word in requirement_lower for word in ("rule", "decision", "workflow", "domain", "写入", "执行")):
+            score += 2
+            reasons.append(f"需求特征与 service_type={profile.get('service_type')} 匹配")
+        if profile.get("service_type") in {"report", "bff", "client"} and any(word in requirement_lower for word in ("query", "report", "history", "read", "list", "page", "查询", "历史", "报表", "页面")):
+            score += 2
+            reasons.append(f"需求特征与 service_type={profile.get('service_type')} 匹配")
+        scored.append({"project": project, "score": score, "reasons": reasons, "profile": profile})
+
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    owner = scored[0] if scored and scored[0]["score"] > 0 else None
+    return {
+        "owner_service": owner["project"] if owner else None,
+        "candidate_services": [item["project"] for item in scored if item["score"] > 0],
+        "rejected_services": [item["project"] for item in scored[1:] if item["score"] > 0],
+        "ownership_reason": owner["reasons"] if owner else ["缺少足够的 service_catalog 命中，需人工判断"],
+        "affected_projects_seed": [owner["project"]] if owner else [],
     }
 
 
@@ -1367,6 +1498,9 @@ def ensure_project_kb(config: Dict[str, Any], project_path: str, force: bool = F
     engineer_id = project_info.get("engineer_id")
     if engineer_id:
         cmd.extend(["--engineer", engineer_id])
+    service_profile = get_service_profile(config, project_path)
+    if service_profile:
+        cmd.extend(["--service-profile", json.dumps(service_profile, ensure_ascii=False)])
 
     if force:
         cmd.append("--force")
@@ -1577,6 +1711,15 @@ def main():
     elif command == "cross-deps":
         seed_projects = sys.argv[3:] if len(sys.argv) > 3 else None
         result = analyze_cross_project_dependencies(config, seed_projects)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    elif command == "ownership":
+        if len(sys.argv) < 4:
+            print("Usage: fullstack_config.py <config> ownership <requirement> [project_paths...]", file=sys.stderr)
+            sys.exit(1)
+        requirement = sys.argv[3]
+        candidates = sys.argv[4:] if len(sys.argv) > 4 else None
+        result = analyze_service_ownership(config, requirement, candidates)
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
     elif command == "ensure-kb":

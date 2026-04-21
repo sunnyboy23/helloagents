@@ -865,6 +865,25 @@ def _infer_project_scope(project_type: str) -> Tuple[List[str], List[str]]:
     return (["以仓库中实际存在的代码与配置为准"], ["未识别部分需要人工确认"])
 
 
+def _normalize_service_profile(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize user-declared service profile."""
+    profile = raw or {}
+    architecture = profile.get("architecture", {}) if isinstance(profile.get("architecture"), dict) else {}
+    return {
+        "service_type": str(profile.get("service_type", "")).strip(),
+        "service_summary": str(profile.get("service_summary", "")).strip(),
+        "business_scope": [str(item).strip() for item in profile.get("business_scope", []) if str(item).strip()],
+        "owned_capabilities": [str(item).strip() for item in profile.get("owned_capabilities", []) if str(item).strip()],
+        "bounded_context": str(profile.get("bounded_context", "")).strip(),
+        "anti_capabilities": [str(item).strip() for item in profile.get("anti_capabilities", []) if str(item).strip()],
+        "architecture": {
+            "style": str(architecture.get("style", "")).strip(),
+            "entrypoints": [str(item).strip() for item in architecture.get("entrypoints", []) if str(item).strip()],
+            "key_modules": [str(item).strip() for item in architecture.get("key_modules", []) if str(item).strip()],
+        },
+    }
+
+
 def _render_context_content(
     project_path: Path,
     engineer_id: Optional[str],
@@ -872,6 +891,7 @@ def _render_context_content(
     effective_stack: List[str],
     scan_result: Dict[str, Any],
     modules: List[str],
+    service_profile: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Render a uniform, evidence-based context.md."""
     package_info = _load_package_json_info(project_path)
@@ -893,6 +913,7 @@ def _render_context_content(
     scripts = package_info.get("scripts", {}) or {}
     in_scope, out_scope = _infer_project_scope(project_type)
     directory_lines = _summarize_directory_overview(project_path, modules)
+    profile = _normalize_service_profile(service_profile)
 
     lines = [
         "# 项目上下文",
@@ -928,7 +949,9 @@ def _render_context_content(
         "",
         "### 核心职责",
     ]
-    if reference_notes:
+    if profile.get("service_summary"):
+        lines.append(f"- {profile['service_summary']}")
+    elif reference_notes:
         first_bullets = reference_notes[0].get("bullets", [])
         if first_bullets:
             lines.extend([f"- {item}" for item in first_bullets[:4]])
@@ -939,17 +962,26 @@ def _render_context_content(
     else:
         lines.append("- 需根据源码和现有业务页面/服务职责进一步补充。")
 
-    lines.extend(
-        [
-            "",
-            "### 项目边界",
-            "```yaml",
-            "范围内:",
-        ]
-    )
+    lines.extend(["", "### 业务范围"])
+    if profile.get("business_scope"):
+        lines.extend([f"- {item}" for item in profile["business_scope"]])
+    else:
+        lines.append("- 未在 service_catalog 中声明，需后续补充。")
+
+    lines.extend(["", "### 架构入口"])
+    if profile["architecture"].get("entrypoints"):
+        lines.extend([f"- `{item}`" for item in profile["architecture"]["entrypoints"]])
+    else:
+        lines.append("- 未在 service_catalog 中声明关键入口。")
+
+    lines.extend(["", "### 项目边界", "```yaml", "范围内:"])
     lines.extend([f"  - {item}" for item in in_scope])
+    if profile.get("owned_capabilities"):
+        lines.extend([f"  - {item}" for item in profile["owned_capabilities"]])
     lines.append("范围外:")
     lines.extend([f"  - {item}" for item in out_scope])
+    if profile.get("anti_capabilities"):
+        lines.extend([f"  - {item}" for item in profile["anti_capabilities"]])
     lines.extend(["```", "", "## 4. 关键命令", ""])
 
     if scripts:
@@ -988,6 +1020,7 @@ def _render_guidelines_content(
     declared_tech_stack: Optional[List[str]],
     effective_stack: List[str],
     scan_result: Dict[str, Any],
+    service_profile: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Render a uniform, evidence-based guidelines.md."""
     package_info = _load_package_json_info(project_path)
@@ -999,6 +1032,7 @@ def _render_guidelines_content(
     test_tools = _detect_test_tools(project_path, package_info, pom_info)
     quality_tools = _detect_quality_tools(project_path, package_info)
     scripts = package_info.get("scripts", {}) or {}
+    profile = _normalize_service_profile(service_profile)
     lines = [
         "# 项目开发指南",
         "",
@@ -1016,6 +1050,7 @@ def _render_guidelines_content(
         "- 优先沿用仓库现有技术栈与目录组织，不引入未被项目采用的新范式。",
         "- 新增或修改文档时，优先补充真实代码事实，不写无法从仓库证明的规范。",
         "- 若项目已有 AI 协作说明文档，新增约定应与其保持一致，冲突时以代码事实和当前仓库配置为准。",
+        "- fullstack 项目 KB 初始化以用户在 service_catalog 中的职责声明为第一事实来源，自动扫描只做轻量补充。",
         "",
         "## 3. 技术栈约束",
         "",
@@ -1036,6 +1071,10 @@ def _render_guidelines_content(
         lines.append("- 未检测到 TailwindCSS，请不要在项目指南中假设或优先推广 TailwindCSS。")
 
     lines.extend(["", "## 4. 开发方式建议", ""])
+    if profile.get("service_summary"):
+        lines.append(f"- 当前服务定位: {profile['service_summary']}")
+    if profile.get("anti_capabilities"):
+        lines.append(f"- 禁止承载: {'；'.join(profile['anti_capabilities'])}")
     if project_type == "frontend":
         lines.append("- 页面、组件、样式、接口封装优先复用现有前端工程模式。")
         if "Ant Design" in style_solution:
@@ -1199,7 +1238,8 @@ def init_project_kb(
     project_path: str,
     declared_tech_stack: Optional[List[str]] = None,
     engineer_id: Optional[str] = None,
-    force: bool = False
+    force: bool = False,
+    service_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     初始化项目知识库
@@ -1238,7 +1278,7 @@ def init_project_kb(
     detected = detect_tech_stack(project)
     effective_stack = list(set((declared_tech_stack or []) + detected))
     scan_result = _run_tech_scanner(project)
-    modules = _scan_project_modules(project)
+    modules: List[str] = []
 
     # 选择模板（仅保留技术栈归类，不再直接写入模板内容）
     template_name = select_template(effective_stack)
@@ -1264,6 +1304,7 @@ def init_project_kb(
                     effective_stack=effective_stack,
                     scan_result=scan_result,
                     modules=modules,
+                    service_profile=service_profile,
                 ),
                 encoding="utf-8",
             )
@@ -1275,6 +1316,7 @@ def init_project_kb(
                     declared_tech_stack=declared_tech_stack,
                     effective_stack=effective_stack,
                     scan_result=scan_result,
+                    service_profile=service_profile,
                 ),
                 encoding="utf-8",
             )
@@ -1344,31 +1386,7 @@ def init_project_kb(
             modules_index.write_text("# 模块索引\n\n<!-- 自动生成 -->\n", encoding="utf-8")
             files_created.append(".helloagents/modules/_index.md")
 
-        # 基于项目扫描增强 context.md 与 modules/_index.md
-        if context_file.exists():
-            summary_block = _build_scan_summary(
-                project_path=project,
-                engineer_id=engineer_id,
-                declared_tech_stack=declared_tech_stack,
-                effective_stack=effective_stack,
-                scan_result=scan_result,
-                modules=modules,
-            )
-            if _upsert_scan_summary(context_file, summary_block):
-                files_created.append(".helloagents/context.md(scan_enriched)")
-
-        module_docs_created = _write_module_docs(
-            kb_root=kb_root,
-            project_path=project,
-            engineer_id=engineer_id,
-            modules=modules,
-            force=force,
-        )
-        files_created.extend(module_docs_created)
-
-        if modules_index.exists():
-            if _write_modules_index(modules_index, modules, force=force):
-                files_created.append(".helloagents/modules/_index.md(scan_enriched)")
+        module_docs_created: List[str] = []
 
         enrichment_session = _write_enrichment_session_request(
             kb_root=kb_root,
@@ -1392,6 +1410,7 @@ def init_project_kb(
                 "scanner_project_type": scan_result.get("project_type", "unknown"),
                 "scanner_detected": scan_result.get("detected", {}),
             },
+            "service_profile": _normalize_service_profile(service_profile),
             "modules_detected": modules,
             "module_docs_created": module_docs_created,
             "enrichment_session": {
@@ -1427,6 +1446,7 @@ def main():
     engineer_id = None
     force = False
     output_json = False
+    service_profile = None
 
     # 解析参数
     i = 2
@@ -1444,10 +1464,16 @@ def main():
         elif arg == "--json":
             output_json = True
             i += 1
+        elif arg == "--service-profile" and i + 1 < len(sys.argv):
+            try:
+                service_profile = json.loads(sys.argv[i + 1])
+            except json.JSONDecodeError:
+                service_profile = None
+            i += 2
         else:
             i += 1
 
-    result = init_project_kb(project_path, tech_stack, engineer_id, force)
+    result = init_project_kb(project_path, tech_stack, engineer_id, force, service_profile)
 
     if output_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

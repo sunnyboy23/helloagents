@@ -22,7 +22,7 @@ tools: Read, Write, Edit, Grep, Glob, Bash, Agent
 
 ```python
 # 读取 fullstack.yaml 配置
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' projects
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' projects
 ```
 
 ### 2. 需求分析
@@ -34,7 +34,7 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstac
 
 ```python
 # 跨项目依赖分析（Layer 6）
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' cross-deps
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' cross-deps
 ```
 
 ### 3. 任务拆解
@@ -70,7 +70,7 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstac
 
 ```python
 # 分析影响范围并拓扑排序
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' impact ./backend/user-service ./backend/order-service
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' impact ./backend/user-service ./backend/order-service
 ```
 
 ### 5. 并发派发
@@ -97,6 +97,26 @@ Task(
 )
 ```
 
+**运行时状态初始化（派发前必做）:**
+
+```python
+# 先把任务组写入运行态 current.json（禁止跳过）
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' create {tasks_json}
+
+# 任务实际派发前先标记开始
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' start {task_id}
+```
+
+说明：
+- `@auto` 会自动解析到全局 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/current.json`
+- 仅当未配置全局根目录时才回退到 `{KB_ROOT}/fullstack/tasks/current.json`
+- 未先执行 `create` 就开始派发，视为协议违规，会导致任务状态、summary、report 全部缺失
+- `create` 前生成的 `tasks_json` 必须带上任务组级 `required_artifacts`：
+  - `fullstack/docs/tasks.md`
+  - `fullstack/docs/agents.md`
+  - `fullstack/docs/upstream.md`
+- 涉及后端接口 / 数据模型 / 跨服务依赖变化的任务，`task_contract.required_artifacts` 必须补 `.helloagents/docs/{feature}_technical_solution.md`
+
 ### 6. 结果汇总
 
 收集所有 ResultMessage，执行:
@@ -104,13 +124,14 @@ Task(
 - 收集问题（issues）
 - 同步技术文档到下游项目
 - 更新全局进度
+- 检查 `artifact_status.missing`，缺失时继续推动补文档，不得提前宣告 fullstack 完成
 
 ```python
 # 处理工程师反馈并触发下游任务（Layer 6）
-python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '{KB_ROOT}/fullstack/tasks/current.json' feedback {task_id} {status} {result_json}
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' feedback {task_id} {status} {result_json}
 
 # 输出进度报告（Layer 6）
-python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '{KB_ROOT}/fullstack/tasks/current.json' report
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' report
 ```
 
 ## 工程师映射

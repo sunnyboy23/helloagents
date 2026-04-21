@@ -12,7 +12,7 @@
 
 ## 前置条件
 
-1. 存在 `{KB_ROOT}/fullstack/fullstack.yaml` 配置文件
+1. 存在 `fullstack.yaml` 配置文件（优先走 `@auto` 解析的全局配置路径，其次回退 `{KB_ROOT}/fullstack/fullstack.yaml`）
 2. 配置文件通过验证（version, mode, engineers 字段完整）
 
 ## 执行流程
@@ -21,11 +21,23 @@
 
 ```yaml
 检查项:
-  - fullstack.yaml 存在性
+  - fullstack.yaml 存在性（必须先读全局 `~/.helloagents/fullstack/config/fullstack.yaml`，再按运行态配置根目录回退，最后才是 `{KB_ROOT}/fullstack/fullstack.yaml`）
   - 配置格式验证
   - 工程师定义完整性
   - 项目路径有效性
 失败处理: 输出配置问题 → 提示执行 ~fullstack init
+```
+
+执行约束:
+
+```yaml
+在输出任何“fullstack 配置缺失 / 尚未进入真实全栈模式 / 无法派发”的结论前，必须完成以下预检:
+  1. 实际读取 `~/.helloagents/fullstack/config/fullstack.yaml`
+  2. 若上下文已提供 `FULLSTACK_RUNTIME_ROOT` / `FULLSTACK_CONFIG_ROOT`，实际读取其 `config/fullstack.yaml`
+  3. 仅读取失败或不存在时，才回退 `{KB_ROOT}/fullstack/fullstack.yaml`
+禁止:
+  - 只检查项目内路径后就声称“没有 fullstack.yaml”
+  - 未读取全局配置就判断“当前没有走真实全栈流程”
 ```
 
 ### 2. 需求评估
@@ -43,11 +55,35 @@
   - 分析服务间依赖
 ```
 
+### 2.5 服务归属分析
+
+```yaml
+适用条件:
+  - 用户需求包含新增业务能力、全新接口、全新页面流程、全新领域对象、跨服务编排
+  - 或 orchestrator 无法直接从现有改动点定位到唯一服务
+
+执行顺序:
+  1. 读取 fullstack.yaml 中的 `service_catalog`
+  2. 优先依据用户声明的服务职责、业务范围、架构入口判断 owner service
+  3. 输出:
+     - owner_service
+     - candidate_owner_services
+     - rejected_services
+     - ownership_reason
+     - affected_projects_seed
+  4. 仅以 `affected_projects_seed` 作为 impact 输入，不允许跳过本步骤直接做依赖扩散
+
+阻断规则:
+  - 无法收敛到唯一 owner service 时，不得直接派发开发任务
+  - 若 `service_catalog` 未声明对应服务职责，只允许输出低置信度建议，不能把 AI 推断当成确定事实
+  - 涉及后端接口/数据模型/跨服务依赖变化时，必须先生成 `.helloagents/docs/{feature}_technical_solution.md` 记录归属判断
+```
+
 ### 3. 影响分析
 
 ```bash
-# 调用配置解析器
-python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '{KB_ROOT}/fullstack/fullstack.yaml' impact {受影响项目列表}
+# 调用配置解析器（统一走 @auto，兼容全局 fullstack 根目录与 legacy 项目内路径）
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' impact {受影响项目列表}
 ```
 
 输出:
@@ -95,6 +131,16 @@ warnings: 非阻断告警与补绑建议
     "requirement": "{原始需求}",
     "api_contracts": ["{上游API契约路径}"]
   },
+  "task_contract": {
+    "verify_mode": "standard | cross_project | api_contract_required | integration_ready",
+    "risk_level": "medium | high",
+    "reviewer_focus": ["依赖影响是否完整", "接口/文档是否同步"],
+    "tester_focus": ["关键路径可验证", "上下游联调风险已覆盖"],
+    "deliverables": ["代码变更摘要", "验证结果摘要"],
+    "upstream_projects": ["{上游项目路径}"],
+    "downstream_projects": ["{下游项目路径}"],
+    "upstream_contracts": ["{上游契约目录}"]
+  },
   "role_activation": {
     "reviewer": true,
     "kb_keeper": true
@@ -102,13 +148,36 @@ warnings: 非阻断告警与补绑建议
 }
 ```
 
+全栈模式强制交付物（创建任务组前后立即落盘并校验）:
+
+- `STATE.md`: 项目级恢复快照
+- `fullstack/tasks/current.json`: 运行态状态文档
+- `fullstack/docs/tasks.md`: 人类可读任务文档
+- `fullstack/docs/agents.md`: 子职能分工文档
+- `fullstack/docs/upstream.md`: upstream 索引文档
+- `.helloagents/docs/{feature}_technical_solution.md`: 涉及后端接口/数据模型/跨服务依赖时必须补齐
+
+任务契约补充要求:
+
+- `task_contract.required_artifacts` 必须列出该任务必须回传的文档/产物
+- orchestrator 在 `tasks_json` 中至少要写入上述三份 fullstack docs 作为任务组级 `required_artifacts`
+- 若缺少 required artifacts，任务状态可以 completed，但 `closeout_status` 必须保持 `needs_attention`
+- `create task group` 前必须生成文档骨架，缺少以下任一文件不得进入任务派发:
+  - `fullstack/docs/tasks.md`
+  - `fullstack/docs/agents.md`
+  - `fullstack/docs/upstream.md`
+- 涉及后端接口/数据模型/跨服务依赖时，还必须生成 `.helloagents/docs/{feature}_technical_solution.md`
+
 ### 5. 项目 KB 检查
 
 ```yaml
 对每个涉及的项目:
   1. 检查 {project}/.helloagents/INDEX.md 是否存在
   2. 不存在且 auto_init_kb=true → 调用初始化脚本
-  3. 等待初始化完成
+  3. 初始化优先消费 fullstack.yaml 中的 `service_catalog`
+  4. 仅补充轻量事实（包管理器、主要依赖、已有 README/AGENTS 摘要、少量关键入口）
+  5. 禁止通过深度递归扫描整个仓库来生成项目 KB
+  6. 等待初始化完成
 ```
 
 ```bash
@@ -145,21 +214,60 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_init_project_kb.py' '{项目路径}' --t
   CURRENT_STAGE: DEVELOP
 
 执行:
-  1. 创建任务状态文件
+  1. 先落盘任务组运行时状态（强制）
+     - 将 task_group_id / requirement / tasks[] / required_artifacts 写入临时 tasks_json
+     - 调用 `fullstack_task_manager.py '@auto' create {tasks_json}`
+     - 成功后立即调用 `status` / `report` 校验:
+       - current.json 已生成
+       - fullstack/docs/tasks.md 已存在
+       - fullstack/docs/agents.md 已存在
+       - fullstack/docs/upstream.md 已存在
   2. 按 DAG 层级派发:
      - 同层任务并行（≤6 并发）
      - 层级间串行等待
-  3. 收集 ResultMessage
-  4. 同步技术文档
-  5. 更新任务状态
+  3. 收集 ResultMessage（包含开发、验证、交付结果）
+  4. 每个任务开始前调用 `start`，收到 ResultMessage 后调用 `feedback`
+  5. 每层完成后调用 `report`，确保 summary/current_layer/blocked_tasks 持续更新
+  6. 更新任务状态（status + verification + closeout + summary）
+     - `report` / `status` 必须检查 `artifact_status.missing`
+     - 缺少 `fullstack/docs/tasks.md`、`agents.md`、`upstream.md` 时不得报告 fullstack 收尾完成
+  7. 同步技术文档
+  8. 进入任务组收尾
 ```
+
+运行态命令约束：
+
+```bash
+# 1) 创建任务组状态（必调）
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' create '{tasks_json}'
+
+# 2) 任务开始
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' start '{task_id}'
+
+# 3) 工程师反馈
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' feedback '{task_id}' '{status}' '{result_json}'
+
+# 4) 实时报告
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' report
+```
+
+说明：
+
+- `@auto` 必须作为全栈运行态唯一推荐入口，禁止再写死 `'{KB_ROOT}/fullstack/tasks/current.json'`
+- 若已配置 `FULLSTACK_RUNTIME_ROOT`，运行时状态必须落到 `FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks/current.json`
+- 未配置时，才允许回退到项目内 `{KB_ROOT}/fullstack/tasks/current.json`
+- fullstack 运行态只保留当前需求状态，`current.json` 是唯一运行态入口，不在 runtime 目录保存历史需求快照
 
 ### 8. 结果汇总
 
 ```yaml
 输出:
   - 执行结果统计
+  - 必需产物状态（artifact_status.present / missing）
   - 变更摘要（按项目）
+  - 验证状态汇总（passed / pending / needs_attention）
+  - 收尾状态汇总（ready / pending / needs_attention）
+  - 当前摘要（current_layer / blocked_tasks / next_step）
   - 技术文档同步情况
   - 问题和注意事项
 ```
@@ -178,15 +286,16 @@ cp {TEMPLATES_DIR}/fullstack.yaml {KB_ROOT}/fullstack/fullstack.yaml
 # 已设置 ~fullstack runtime set-root 时，默认改为使用统一全局根目录
 # FULLSTACK_RUNTIME_ROOT/config/fullstack.yaml
 # FULLSTACK_RUNTIME_ROOT/index/*
-# FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/*
+# FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks/*
 ```
 
 说明:
 
 - 若配置 `FULLSTACK_RUNTIME_ROOT`，它将作为统一的全局 fullstack 根目录：
-  - 任务状态文件写入 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks`
+  - 任务状态文件写入 `FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks`
   - `fullstack.yaml` 默认写入 `FULLSTACK_RUNTIME_ROOT/config/fullstack.yaml`
   - 迁移索引默认写入 `FULLSTACK_RUNTIME_ROOT/index/`
+- `project_runtime_key` 来源于 `project_root` 绝对路径的稳定 hash，用于隔离项目级运行态；它不是项目名，也不是需求名
 - 未配置时，继续使用 legacy 项目内路径
 - 可在 `init` 前通过命令设置运行态根目录：
 

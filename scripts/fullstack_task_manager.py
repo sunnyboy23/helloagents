@@ -13,6 +13,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+DEFAULT_FULLSTACK_REQUIRED_ARTIFACTS = [
+    {
+        "key": "fullstack/docs/tasks.md",
+        "description": "全栈任务文档，记录任务拆解、负责人、完成标准和验证方式",
+    },
+    {
+        "key": "fullstack/docs/agents.md",
+        "description": "子职能分工文档，记录 orchestrator / backend / frontend / qa 的责任边界",
+    },
+    {
+        "key": "fullstack/docs/upstream.md",
+        "description": "upstream 索引文档，记录跨项目依赖、阻塞项和同步状态",
+    },
+]
+
 
 class TaskManager:
     """任务状态管理器"""
@@ -42,6 +57,8 @@ class TaskManager:
     def _save_state(self):
         """保存状态文件"""
         self.state["updated_at"] = datetime.now().isoformat()
+        self.state["artifact_status"] = self._build_artifact_status()
+        self.state["summary"] = self._build_runtime_summary()
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
@@ -50,7 +67,8 @@ class TaskManager:
         self,
         task_group_id: str,
         requirement: str,
-        tasks: List[Dict[str, Any]]
+        tasks: List[Dict[str, Any]],
+        required_artifacts: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         创建任务组
@@ -71,11 +89,16 @@ class TaskManager:
                 tasks_dict[task_id] = {
                     **task,
                     "status": "pending",
-                    "retry_count": 0
+                    "retry_count": 0,
+                    "verification_status": "pending",
+                    "closeout_status": "pending",
+                    "task_contract": task.get("task_contract", {}),
                 }
 
         # 计算执行层级
         execution_layers = self._compute_execution_layers(tasks_dict)
+        artifacts = required_artifacts or DEFAULT_FULLSTACK_REQUIRED_ARTIFACTS
+        scaffold_result = self._scaffold_required_artifacts(artifacts)
 
         self.state = {
             "task_group_id": task_group_id,
@@ -88,11 +111,25 @@ class TaskManager:
                 "completed": 0,
                 "failed": 0,
                 "in_progress": 0,
-                "pending": len(tasks)
+                "pending": len(tasks),
+                "blocked": 0,
+            },
+            "verification": {
+                "pending": len(tasks),
+                "passed": 0,
+                "needs_attention": 0,
+            },
+            "closeout": {
+                "pending": len(tasks),
+                "ready": 0,
+                "needs_attention": 0,
             },
             "execution_layers": execution_layers,
             "tasks": tasks_dict,
-            "tech_docs_synced": []
+            "tech_docs_synced": [],
+            "required_artifacts": artifacts,
+            "artifact_scaffold": scaffold_result,
+            "summary": {},
         }
 
         self._save_state()
@@ -101,8 +138,78 @@ class TaskManager:
             "success": True,
             "task_group_id": task_group_id,
             "total_tasks": len(tasks),
-            "layers": len(execution_layers)
+            "layers": len(execution_layers),
+            "artifact_scaffold": scaffold_result,
         }
+
+    def _get_project_root(self) -> Path:
+        return Path(os.environ.get("HELLOAGENTS_PROJECT_ROOT", str(Path.cwd()))).resolve()
+
+    def _get_kb_root(self) -> Path:
+        return Path(
+            os.environ.get(
+                "HELLOAGENTS_KB_ROOT",
+                str(self._get_project_root() / ".helloagents"),
+            )
+        ).resolve()
+
+    def _artifact_absolute_path(self, artifact_key: str) -> Path:
+        normalized = self._normalize_artifact_key(artifact_key)
+        return self._get_kb_root() / normalized
+
+    def _default_artifact_content(self, artifact_key: str) -> str:
+        normalized = self._normalize_artifact_key(artifact_key)
+        if normalized == "fullstack/docs/tasks.md":
+            return (
+                "# 全栈任务文档\n\n"
+                "## 任务组信息\n"
+                "- 任务组 ID：\n- 需求摘要：\n- 当前阶段：\n- 当前运行态：`fullstack/tasks/current.json`\n\n"
+                "## 任务清单\n"
+                "| 任务 ID | 类型 | Owner Service | 工程师 | 项目 | 描述 | 依赖 | 必需产物 | 验证方式 | 当前状态 |\n"
+                "|--------|------|---------------|--------|------|------|------|----------|----------|----------|\n"
+            )
+        if normalized == "fullstack/docs/agents.md":
+            return (
+                "# 全栈子职能分工\n\n"
+                "## 角色边界\n"
+                "| 角色 | 负责人 | 负责项目/模块 | 主要输出 | 当前状态 |\n"
+                "|------|--------|---------------|----------|----------|\n"
+                "| orchestrator |  |  | 任务编排、状态汇总、阻塞升级 | planned |\n\n"
+                "## 服务归属判断\n"
+                "| 需求能力 | 推荐承载服务 | 不应承载服务 | 判断原因 | 结论 |\n"
+                "|----------|--------------|--------------|----------|------|\n"
+            )
+        if normalized == "fullstack/docs/upstream.md":
+            return (
+                "# Fullstack Upstream 索引\n\n"
+                "## 依赖总览\n"
+                "| 上游对象 | 契约文件 | 当前状态 | 提供内容 | 下游消费者 | 是否已同步 | 阻塞项 |\n"
+                "|---------|----------|----------|----------|------------|------------|--------|\n"
+            )
+        if normalized.endswith("_technical_solution.md"):
+            return "# 技术方案\n\n## 需求背景与目标\n- 待补充\n\n## 服务归属判断\n- owner service:\n- ownership reason:\n"
+        return ""
+
+    def _scaffold_required_artifacts(self, artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        created: List[str] = []
+        existing: List[str] = []
+        missing: List[str] = []
+        for item in artifacts:
+            key = self._normalize_artifact_key(item.get("key") if isinstance(item, dict) else item)
+            if not key:
+                continue
+            path = self._artifact_absolute_path(key)
+            if path.exists():
+                existing.append(key)
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            content = self._default_artifact_content(key)
+            if content:
+                path.write_text(content, encoding="utf-8")
+                created.append(key)
+            else:
+                missing.append(key)
+        return {"created": created, "existing": existing, "missing": missing}
 
     def _compute_execution_layers(self, tasks: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -247,6 +354,8 @@ class TaskManager:
         task["status"] = status
         task["completed_at"] = datetime.now().isoformat()
         task["result"] = result
+        task["verification_status"] = self._derive_verification_status(task, result, status)
+        task["closeout_status"] = self._derive_closeout_status(task, result, status)
 
         # 如果失败，记录错误
         if status == "failed":
@@ -454,7 +563,18 @@ class TaskManager:
             "completed": 0,
             "failed": 0,
             "in_progress": 0,
-            "pending": 0
+            "pending": 0,
+            "blocked": 0,
+        }
+        verification = {
+            "pending": 0,
+            "passed": 0,
+            "needs_attention": 0,
+        }
+        closeout = {
+            "pending": 0,
+            "ready": 0,
+            "needs_attention": 0,
         }
 
         for task in tasks.values():
@@ -465,18 +585,45 @@ class TaskManager:
                 progress["failed"] += 1
             elif status == "in_progress":
                 progress["in_progress"] += 1
+            elif status == "blocked":
+                progress["blocked"] += 1
             else:
                 progress["pending"] += 1
 
+            verification_status = task.get("verification_status", "pending")
+            if verification_status == "passed":
+                verification["passed"] += 1
+            elif verification_status == "needs_attention":
+                verification["needs_attention"] += 1
+            else:
+                verification["pending"] += 1
+
+            closeout_status = task.get("closeout_status", "pending")
+            if closeout_status == "ready":
+                closeout["ready"] += 1
+            elif closeout_status == "needs_attention":
+                closeout["needs_attention"] += 1
+            else:
+                closeout["pending"] += 1
+
         self.state["progress"] = progress
+        self.state["verification"] = verification
+        self.state["closeout"] = closeout
 
         # 更新整体状态
         if progress["completed"] == progress["total"]:
             self.state["status"] = "completed"
-        elif progress["failed"] > 0 and progress["in_progress"] == 0 and progress["pending"] == 0:
+        elif (
+            progress["failed"] > 0
+            and progress["in_progress"] == 0
+            and progress["pending"] == 0
+            and progress["blocked"] == 0
+        ):
             self.state["status"] = "partial" if progress["completed"] > 0 else "failed"
         elif progress["in_progress"] > 0:
             self.state["status"] = "in_progress"
+        elif progress["blocked"] > 0 and progress["pending"] == 0:
+            self.state["status"] = "blocked"
 
     def record_tech_doc_sync(
         self,
@@ -512,8 +659,12 @@ class TaskManager:
             "task_group_id": self.state.get("task_group_id"),
             "status": self.state.get("status"),
             "progress": self.state.get("progress"),
+            "verification": self.state.get("verification", {}),
+            "closeout": self.state.get("closeout", {}),
+            "artifact_status": self.state.get("artifact_status", {}),
             "current_layer": self._get_current_layer_info(),
-            "tech_docs_synced": len(self.state.get("tech_docs_synced", []))
+            "tech_docs_synced": len(self.state.get("tech_docs_synced", [])),
+            "summary": self.state.get("summary", {}),
         }
 
     def get_progress_report(self) -> Dict[str, Any]:
@@ -549,8 +700,12 @@ class TaskManager:
             "task_group_id": self.state.get("task_group_id"),
             "overall_status": self.state.get("status"),
             "progress": self.state.get("progress", {}),
+            "verification": self.state.get("verification", {}),
+            "closeout": self.state.get("closeout", {}),
+            "artifact_status": self.state.get("artifact_status", {}),
             "current_layer": self._get_current_layer_info(),
             "tasks_by_status": by_status,
+            "summary": self.state.get("summary", {}),
         }
 
     def _get_current_layer_info(self) -> Optional[Dict[str, Any]]:
@@ -563,6 +718,229 @@ class TaskManager:
                     "tasks": len(layer.get("task_ids", []))
                 }
         return None
+
+    def _derive_verification_status(
+        self, task: Dict[str, Any], result: Dict[str, Any], status: str
+    ) -> str:
+        """从执行结果推导任务验证状态。"""
+        if status == "failed":
+            return "needs_attention"
+        if status != "completed":
+            return "pending"
+
+        verification = result.get("verification")
+        if isinstance(verification, dict):
+            verified = verification.get("passed")
+            if verified is True:
+                return "passed"
+            if verified is False:
+                return "needs_attention"
+
+        if result.get("verified") is True:
+            return "passed"
+        if result.get("verified") is False:
+            return "needs_attention"
+        return "pending"
+
+    def _derive_closeout_status(
+        self, task: Dict[str, Any], result: Dict[str, Any], status: str
+    ) -> str:
+        """从执行结果推导任务收尾状态。"""
+        if status == "failed":
+            return "needs_attention"
+        if status != "completed":
+            return "pending"
+
+        if self._find_missing_required_artifacts(task, result):
+            return "needs_attention"
+
+        deliverables = result.get("deliverables")
+        if isinstance(deliverables, dict):
+            if deliverables.get("synced") is True or deliverables.get("ready") is True:
+                return "ready"
+            if deliverables.get("synced") is False or deliverables.get("ready") is False:
+                return "needs_attention"
+
+        if result.get("tech_docs") or result.get("kb_updates"):
+            return "ready"
+        return "pending"
+
+    def _normalize_artifact_key(self, value: Any) -> str:
+        """归一化 artifact key，兼容路径和类型名。"""
+        text = str(value or "").strip()
+        text = text.replace("\\", "/")
+        if text.startswith("./"):
+            text = text[2:]
+        if text.startswith(".helloagents/"):
+            text = text[len(".helloagents/"):]
+        return text
+
+    def _artifact_matches(self, required_key: str, recorded_key: str) -> bool:
+        """判断 recorded artifact 是否满足 required artifact。"""
+        normalized_required = self._normalize_artifact_key(required_key)
+        normalized_recorded = self._normalize_artifact_key(recorded_key)
+        return (
+            normalized_required == normalized_recorded
+            or normalized_recorded.endswith(normalized_required)
+            or normalized_required.endswith(normalized_recorded)
+        )
+
+    def _extract_recorded_artifact_keys(self, result: Dict[str, Any]) -> List[str]:
+        """从任务结果中提取已记录产物。"""
+        keys = set()
+
+        def collect(candidate: Any) -> None:
+            if isinstance(candidate, str):
+                normalized = self._normalize_artifact_key(candidate)
+                if normalized:
+                    keys.add(normalized)
+            elif isinstance(candidate, dict):
+                for field in ("key", "path", "type", "name"):
+                    if candidate.get(field):
+                        normalized = self._normalize_artifact_key(candidate[field])
+                        if normalized:
+                            keys.add(normalized)
+            elif isinstance(candidate, list):
+                for item in candidate:
+                    collect(item)
+
+        collect(result.get("artifacts"))
+        collect(result.get("tech_docs"))
+        collect(result.get("kb_updates"))
+
+        deliverables = result.get("deliverables")
+        if isinstance(deliverables, dict):
+            collect(deliverables.get("artifacts"))
+            collect(deliverables.get("docs"))
+
+        return sorted(keys)
+
+    def _find_missing_required_artifacts(
+        self, task: Dict[str, Any], result: Dict[str, Any]
+    ) -> List[str]:
+        """计算任务级缺失的必需产物。"""
+        task_contract = task.get("task_contract", {})
+        required = task_contract.get("required_artifacts", [])
+        if not isinstance(required, list) or not required:
+            return []
+
+        recorded = self._extract_recorded_artifact_keys(result)
+        missing = []
+        for item in required:
+            required_key = self._normalize_artifact_key(
+                item.get("key") if isinstance(item, dict) else item
+            )
+            if not required_key:
+                continue
+            if not any(self._artifact_matches(required_key, key) for key in recorded):
+                missing.append(required_key)
+        return missing
+
+    def _iter_required_artifacts(self) -> List[Dict[str, str]]:
+        """返回任务组级必需产物列表。"""
+        items = self.state.get("required_artifacts", DEFAULT_FULLSTACK_REQUIRED_ARTIFACTS)
+        normalized = []
+        for item in items:
+            if isinstance(item, dict):
+                key = self._normalize_artifact_key(item.get("key") or item.get("path") or item.get("type"))
+                if key:
+                    normalized.append(
+                        {
+                            "key": key,
+                            "description": str(item.get("description") or key),
+                        }
+                    )
+            elif item:
+                key = self._normalize_artifact_key(item)
+                normalized.append({"key": key, "description": key})
+        return normalized
+
+    def _build_artifact_status(self) -> Dict[str, Any]:
+        """汇总任务组级必需产物状态。"""
+        required = self._iter_required_artifacts()
+        recorded = set()
+
+        for task in self.state.get("tasks", {}).values():
+            result = task.get("result", {})
+            if isinstance(result, dict):
+                recorded.update(self._extract_recorded_artifact_keys(result))
+
+        present = []
+        missing = []
+        artifact_state = []
+        for item in required:
+            absolute_path = self._artifact_absolute_path(item["key"])
+            exists = absolute_path.exists()
+            recorded_match = any(self._artifact_matches(item["key"], key) for key in recorded)
+            if exists and recorded_match:
+                state = "verified"
+            elif exists:
+                state = "scaffolded"
+            else:
+                state = "missing"
+            artifact_state.append(
+                {
+                    "key": item["key"],
+                    "path": str(absolute_path),
+                    "state": state,
+                }
+            )
+            if exists:
+                present.append(item)
+            else:
+                missing.append(item)
+
+        return {
+            "required": required,
+            "present": present,
+            "missing": missing,
+            "recorded_keys": sorted(recorded),
+            "artifact_state": artifact_state,
+        }
+
+    def _build_runtime_summary(self) -> Dict[str, Any]:
+        """生成任务组摘要，便于恢复执行和人工接管。"""
+        tasks = self.state.get("tasks", {})
+        completed_projects = []
+        pending_projects = []
+        blocked_tasks = []
+
+        for task_id, task in tasks.items():
+            project = task.get("project")
+            item = {
+                "task_id": task_id,
+                "project": project,
+                "description": task.get("description"),
+            }
+            if task.get("status") == "completed":
+                completed_projects.append(item)
+            elif task.get("status") == "blocked":
+                blocked_tasks.append(item)
+            elif task.get("status") in {"pending", "in_progress", "partial", "failed"}:
+                pending_projects.append(item)
+
+        current_layer = self._get_current_layer_info()
+        next_step = "等待当前层完成后继续派发下游任务"
+        if current_layer is None and self.state.get("status") == "completed":
+            next_step = "进入技术文档同步与任务组收尾"
+        elif self.state.get("status") in {"failed", "partial", "blocked"}:
+            next_step = "优先处理失败/阻塞任务，再决定是否继续后续层级"
+
+        artifact_status = self.state.get("artifact_status", {})
+        missing_artifacts = artifact_status.get("missing", [])
+        if missing_artifacts and self.state.get("status") == "completed":
+            next_step = "先补齐 fullstack 必需产物，再进入统一收尾"
+
+        return {
+            "requirement": self.state.get("requirement", ""),
+            "overall_status": self.state.get("status"),
+            "current_layer": current_layer,
+            "completed_projects": completed_projects,
+            "pending_projects": pending_projects,
+            "blocked_tasks": blocked_tasks,
+            "missing_artifacts": missing_artifacts,
+            "next_step": next_step,
+        }
 
 
 def resolve_state_file_arg(state_file_arg: str) -> str:
@@ -620,7 +998,8 @@ def main():
         result = manager.create_task_group(
             data.get("task_group_id", f"{datetime.now().strftime('%Y%m%d')}-unnamed"),
             data.get("requirement", ""),
-            data.get("tasks", [])
+            data.get("tasks", []),
+            data.get("required_artifacts"),
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
 

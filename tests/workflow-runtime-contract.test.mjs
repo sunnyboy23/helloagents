@@ -224,4 +224,39 @@ test('workflow templates and bootstrap stay aligned with runtime artifacts', () 
   assert.match(readText(join(REPO_ROOT, 'bootstrap-lite.md')), /状态图标与收尾内容必须一致/)
   assert.match(readText(join(REPO_ROOT, 'bootstrap-lite.md')), /未激活项目且未进入方案包 \/ `contract\.json` \/ 证据链路时/)
   assert.match(readText(join(REPO_ROOT, 'bootstrap-lite.md')), /主线判断依据优先级/)
+
+  const repoAgents = readText(join(REPO_ROOT, 'AGENTS.md'))
+  const bootstrapFull = readText(join(REPO_ROOT, 'bootstrap.md'))
+  assert.equal(repoAgents, bootstrapFull)
+
+  const fullstackSkill = readText(join(REPO_ROOT, 'skills', 'commands', 'fullstack', 'SKILL.md'))
+  assert.match(fullstackSkill, /functions\/fullstack\.md/)
+  assert.match(fullstackSkill, /services\/fullstack\.md/)
+  assert.match(fullstackSkill, /~fs/)
+
+  const fullstackFunction = readText(join(REPO_ROOT, 'functions', 'fullstack.md'))
+  assert.match(fullstackFunction, /fullstack\/docs\/tasks\.md/)
+  assert.match(fullstackFunction, /fullstack\/docs\/agents\.md/)
+  assert.match(fullstackFunction, /fullstack\/docs\/upstream\.md/)
+  assert.match(fullstackFunction, /artifact_status\.missing/)
+
+  const fullstackService = readText(join(REPO_ROOT, 'services', 'fullstack.md'))
+  assert.match(fullstackService, /artifact_status/)
+  assert.match(fullstackService, /technical_solution/)
+
+  const fullstackTasksTemplate = readText(join(REPO_ROOT, 'templates', 'fullstack_tasks.md'))
+  assert.match(fullstackTasksTemplate, /完成标准/)
+  assert.match(fullstackTasksTemplate, /验证方式/)
+
+  const fullstackAgentsTemplate = readText(join(REPO_ROOT, 'templates', 'fullstack_agents.md'))
+  assert.match(fullstackAgentsTemplate, /角色边界/)
+  assert.match(fullstackAgentsTemplate, /orchestrator/)
+
+  const fullstackUpstreamTemplate = readText(join(REPO_ROOT, 'templates', 'fullstack_upstream.md'))
+  assert.match(fullstackUpstreamTemplate, /依赖总览/)
+  assert.match(fullstackUpstreamTemplate, /阻塞项/)
+
+  const helpSkill = readText(join(REPO_ROOT, 'skills', 'commands', 'help', 'SKILL.md'))
+  assert.match(helpSkill, /~fullstack/)
+  assert.match(helpSkill, /`~fs` → 等同 `~fullstack`/)
 })

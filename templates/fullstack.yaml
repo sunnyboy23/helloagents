@@ -1,6 +1,6 @@
 # HelloAGENTS 全栈模式配置文件
 # 版本: 1.0
-# 说明: 定义工程师角色、项目绑定和服务依赖关系
+# 说明: 定义工程师角色、项目绑定、服务职责和服务依赖关系
 
 version: "1.0"
 mode: fullstack
@@ -135,6 +135,61 @@ service_dependencies:
     depends_on: ["./backend/api-gateway"]
 
 # ============================================================
+# 服务职责目录
+# 用于“新需求应该落到哪个服务”的归属判断
+# 用户可以先写粗粒度描述，后续再逐步补全字段
+# ============================================================
+service_catalog:
+  "./backend/user-service":
+    service_type: domain
+    service_summary: "承载用户主数据、账户信息和用户领域规则"
+    business_scope:
+      - 用户资料
+      - 账户信息
+    owned_capabilities:
+      - user_profile
+      - user_account
+    architecture:
+      style: layered
+      entrypoints:
+        - controller/user
+      key_modules:
+        - user
+        - account
+    write_authority:
+      - user_profile
+      - user_account
+    read_authority:
+      - user_profile
+    bounded_context: user
+    anti_capabilities:
+      - 聚合多个后端服务的数据编排
+
+  "./backend/bff":
+    service_type: bff
+    service_summary: "面向前端聚合后端能力，承载接口编排和展示态聚合"
+    business_scope:
+      - 前端聚合接口
+      - 页面查询编排
+    owned_capabilities:
+      - frontend_aggregation
+      - page_view_model
+    architecture:
+      style: layered
+      entrypoints:
+        - controller/bff
+      key_modules:
+        - aggregation
+        - view_model
+    write_authority: []
+    read_authority:
+      - page_view_model
+    bounded_context: frontend_access
+    anti_capabilities:
+      - 核心领域规则
+      - 主数据写入
+
+# ============================================================
 # 主代理（Orchestrator）配置
 # ============================================================
 orchestrator:
@@ -163,3 +218,7 @@ tech_doc_templates:
   api_contract: "templates/api_contract.md"
   database_design: "templates/database_design.md"
   architecture: "templates/architecture.md"
+  technical_solution: "templates/technical_solution.md"
+  task_breakdown: "templates/fullstack_tasks.md"
+  agent_assignment: "templates/fullstack_agents.md"
+  upstream_index: "templates/fullstack_upstream.md"

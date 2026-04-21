@@ -9,6 +9,15 @@
 同一轮内对同一配置文件、模块、SKILL、模板只读取一次，后续直接复用已得结论，不要重复探测或重复读取同一路径。
 在受限 CLI（如工作区限制导致家目录不可读）中，确需读取但失败时必须明确说明，并按默认值或当前已知设置执行；禁止静默回退或假装读取成功。
 
+### ~fullstack 配置预检
+- 当用户触发 `~fullstack` / `~fs` 或要求判断是否进入真实全栈模式时，必须先实际读取 fullstack 配置，再做任何结论
+- 读取优先级固定为：
+  1. `~/.helloagents/fullstack/config/fullstack.yaml`
+  2. 若上下文已提供 `FULLSTACK_RUNTIME_ROOT` / `FULLSTACK_CONFIG_ROOT`，读取其对应的 `config/fullstack.yaml`
+  3. 项目内 `{KB_ROOT}/fullstack/fullstack.yaml`
+- 只有在以上路径都确认不存在，或读取失败且已明确说明失败原因后，才能判定 fullstack 配置缺失
+- 禁止只检查项目内 `.helloagents/fullstack/fullstack.yaml` 就下结论
+
 ## 编码原则
 - 代码是唯一判断依据，文档与代码不一致时以代码为准
 - 代码体积控制：

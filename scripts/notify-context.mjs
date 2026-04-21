@@ -13,6 +13,7 @@ const COMMAND_ALIASES = {
   do: 'build',
   design: 'plan',
   review: 'verify',
+  fs: 'fullstack',
 };
 
 function buildPackageRootBlock(pkgRoot) {
@@ -59,6 +60,9 @@ function buildAliasRouteNote(skillName) {
   }
   if (skillName === 'review') {
     return '兼容别名映射：本次按 ~verify 的审查优先模式执行。';
+  }
+  if (skillName === 'fs') {
+    return '兼容别名映射：本次按 ~fullstack 规则执行。';
   }
   return '';
 }
