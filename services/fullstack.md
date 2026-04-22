@@ -149,7 +149,7 @@
 触发: 工程师反馈任务结果时
 参数: taskGroupId, taskId, status, result
 流程:
-  1. 通过 `fullstack_task_manager.py '@auto'` 读取当前状态
+  1. 通过 `helloagents fullstack status` / `feedback` 读取并更新当前状态
   2. 更新指定任务状态
   3. 重新计算进度
   4. 检查是否触发下游任务

@@ -23,6 +23,7 @@ import {
   syncVersion,
 } from './scripts/cli-lifecycle.mjs'
 import { initCliDoctor, runDoctor } from './scripts/cli-doctor.mjs'
+import { handleFullstackCli } from './scripts/fullstack-cli.mjs'
 import { createMessageHelpers, createInstallMessagePrinter } from './scripts/cli-messages.mjs'
 
 const HOME = homedir()
@@ -77,9 +78,9 @@ function printPostinstallMessage() {
   ))
 }
 
-function runSafely(handler) {
+async function runSafely(handler) {
   try {
-    handler()
+    await handler()
   } catch (error) {
     console.error(`\n  ✗ ${error.message}\n`)
     process.exitCode = 1
@@ -97,6 +98,11 @@ if (cmd === 'postinstall') {
   syncVersion()
 } else if (cmd === 'doctor') {
   runSafely(() => runDoctor(argv.slice(1)))
+} else if (cmd === 'fullstack') {
+  runSafely(async () => {
+    const okResult = await handleFullstackCli(argv.slice(1))
+    if (!okResult) process.exitCode = 1
+  })
 } else if (cmd === '--global' || cmd === '--standby') {
   switchMode(cmd === '--global' ? 'global' : 'standby')
 } else if (['install', 'update', 'uninstall', 'cleanup', '--cleanup'].includes(cmd)) {

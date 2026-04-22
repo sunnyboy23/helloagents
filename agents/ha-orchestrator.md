@@ -20,9 +20,9 @@ tools: Read, Write, Edit, Grep, Glob, Bash, Agent
 
 ### 1. 加载配置
 
-```python
+```bash
 # 读取 fullstack.yaml 配置
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' projects
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack projects
 ```
 
 ### 2. 需求分析
@@ -32,9 +32,9 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' pyt
 - 受影响的项目列表
 - 服务间依赖关系
 
-```python
+```bash
 # 跨项目依赖分析（Layer 6）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' cross-deps
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack cross-deps
 ```
 
 ### 3. 任务拆解
@@ -68,9 +68,9 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' pyt
 
 ### 4. DAG 拓扑排序
 
-```python
+```bash
 # 分析影响范围并拓扑排序
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' impact ./backend/user-service ./backend/order-service
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack impact ./backend/user-service ./backend/order-service
 ```
 
 ### 5. 并发派发
@@ -99,12 +99,12 @@ Task(
 
 **运行时状态初始化（派发前必做）:**
 
-```python
+```bash
 # 先把任务组写入运行态 current.json（禁止跳过）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' create {tasks_json}
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack create {tasks_json}
 
 # 任务实际派发前先标记开始
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' start {task_id}
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack start {task_id}
 ```
 
 说明：
@@ -126,12 +126,12 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' pyt
 - 更新全局进度
 - 检查 `artifact_status.missing`，缺失时继续推动补文档，不得提前宣告 fullstack 完成
 
-```python
+```bash
 # 处理工程师反馈并触发下游任务（Layer 6）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' feedback {task_id} {status} {result_json}
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack feedback {task_id} {status} {result_json}
 
 # 输出进度报告（Layer 6）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' report
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack report
 ```
 
 ## 工程师映射

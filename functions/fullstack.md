@@ -82,8 +82,8 @@
 ### 3. 影响分析
 
 ```bash
-# 调用配置解析器（统一走 @auto，兼容全局 fullstack 根目录与 legacy 项目内路径）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_config.py' '@auto' impact {受影响项目列表}
+# 调用 Node.js 影响分析器（统一走 fullstack CLI，兼容全局 fullstack 根目录与 legacy 项目内路径）
+helloagents fullstack impact '{受影响项目路径1}' '{受影响项目路径2}'
 ```
 
 输出:
@@ -182,7 +182,7 @@ warnings: 非阻断告警与补绑建议
 
 ```bash
 # 初始化项目知识库
-python -X utf8 '{SCRIPTS_DIR}/fullstack_init_project_kb.py' '{项目路径}' --tech {技术栈} --engineer {工程师ID}
+helloagents fullstack kb init '{项目路径}'
 ```
 
 ### 6. 确认信息
@@ -216,7 +216,7 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_init_project_kb.py' '{项目路径}' --t
 执行:
   1. 先落盘任务组运行时状态（强制）
      - 将 task_group_id / requirement / tasks[] / required_artifacts 写入临时 tasks_json
-     - 调用 `fullstack_task_manager.py '@auto' create {tasks_json}`
+     - 调用 `helloagents fullstack create {tasks_json}`
      - 成功后立即调用 `status` / `report` 校验:
        - current.json 已生成
        - fullstack/docs/tasks.md 已存在
@@ -239,16 +239,16 @@ python -X utf8 '{SCRIPTS_DIR}/fullstack_init_project_kb.py' '{项目路径}' --t
 
 ```bash
 # 1) 创建任务组状态（必调）
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' create '{tasks_json}'
+helloagents fullstack create '{tasks_json}'
 
 # 2) 任务开始
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' start '{task_id}'
+helloagents fullstack start '{task_id}'
 
 # 3) 工程师反馈
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' feedback '{task_id}' '{status}' '{result_json}'
+helloagents fullstack feedback '{task_id}' '{status}' '{result_json}'
 
 # 4) 实时报告
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' report
+helloagents fullstack report
 ```
 
 说明：
@@ -315,7 +315,7 @@ cp {TEMPLATES_DIR}/fullstack.yaml {KB_ROOT}/fullstack/fullstack.yaml
 可选环境变量（覆盖默认 cwd 推断）:
 
 ```bash
-HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' python -X utf8 '{SCRIPTS_DIR}/fullstack_task_manager.py' '@auto' status
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack status
 ```
 
 ### ~fullstack projects

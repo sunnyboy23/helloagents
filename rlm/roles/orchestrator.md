@@ -61,9 +61,9 @@
 处理:
   1. 理解需求意图
   2. 识别涉及的业务领域（用户、订单、支付等）
-  3. 调用 fullstack_config.py 获取服务依赖
-  3.1 可选调用 detect-engineer 自动识别工程师类型
-  3.2 可选调用 cross-deps 做跨项目依赖分析
+  3. 调用 `helloagents fullstack projects` / `impact` / `cross-deps` 获取服务依赖
+  3.1 可选结合 `service_catalog` 判断 owner service
+  3.2 可选调用 `helloagents fullstack cross-deps` 做跨项目依赖分析
   4. 计算受影响的项目列表
 输出: 影响分析结果
 ```
@@ -78,7 +78,7 @@
   3. 按 orchestrator.backend_first 调整优先级
   3.1 同一工程师的多项目任务分组（按工程师 ID 聚合）
   3.2 组内按项目依赖拓扑排序，构建项目切换上下文
-  4. 先生成 tasks_json，再调用 `fullstack_task_manager.py '@auto' create {tasks_json}` 强制创建运行态 current.json
+  4. 先生成 tasks_json，再调用 `helloagents fullstack create {tasks_json}` 强制创建运行态 current.json
      - tasks_json 必须包含任务组级 `required_artifacts`：
        - fullstack/docs/tasks.md
        - fullstack/docs/agents.md
@@ -95,7 +95,7 @@
 处理:
   对每个涉及的项目:
     1. 检查 {project}/.helloagents/INDEX.md 是否存在
-    2. 不存在且 auto_init_kb=true → 调用 fullstack_config.py ensure-kb（内部触发 fullstack_init_project_kb.py）
+    2. 不存在且 auto_init_kb=true → 调用 `helloagents fullstack kb init {project_path}`
     3. 等待初始化完成
 输出: KB 就绪确认
 ```
@@ -109,12 +109,12 @@
   2. 从 Layer 1 开始：
      - 同层任务并发派发（≤6 并发）
      - 构造 TaskMessage（含 role_activation）
-     - 每个任务派发前调用 `fullstack_task_manager.py '@auto' start {task_id}`
+     - 每个任务派发前调用 `helloagents fullstack start {task_id}`
      - 调用 Task 工具派发给工程师子代理
   3. 等待同层全部完成
   4. 处理返回的 ResultMessage
-  5. 通过 fullstack_task_manager.py feedback 更新任务状态并触发下一层
-  6. 通过 fullstack_task_manager.py report 输出实时进度
+  5. 通过 `helloagents fullstack feedback` 更新任务状态并触发下一层
+  6. 通过 `helloagents fullstack report` 输出实时进度
 输出: 执行结果
 ```
 
