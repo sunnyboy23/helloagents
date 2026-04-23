@@ -3,6 +3,12 @@ node_modules/
 npm-debug.log*
 package-lock.json
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Distribution
 dist/
 *.tgz
@@ -24,5 +30,4 @@ COMMIT_MESSAGE.md
 .claude/settings.local.json
 %TEMP%updater_committed.py
 nul
-完整设计提示词.txt
-tests/
+
