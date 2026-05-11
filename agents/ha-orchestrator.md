@@ -13,7 +13,7 @@ tools: Read, Write, Edit, Grep, Glob, Bash, Agent
 1. **需求分析**: 解析用户需求，识别涉及的业务领域和项目
 2. **任务拆解**: 将需求拆解为工程师级任务，建立 DAG 依赖
 3. **并发调度**: 按 DAG 层级并发派发任务（≤6 并发）
-4. **状态管理**: 实时追踪任务状态，触发下游任务
+4. **状态管理**: 实时追踪任务状态，触发下游任务，并维护全局运行态与项目本地任务投影
 5. **文档同步**: 后端 API 契约同步到前端/BFF 项目
 
 ## 调度流程
@@ -48,6 +48,13 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
   "engineer_id": "be-java-core",
   "project": "./backend/user-service",
   "description": "实现用户积分查询和扣减接口",
+  "local_runtime": {
+    "inbox": ".helloagents/fullstack/inbox/20260324-积分功能.be-java-core.task.json",
+    "state": ".helloagents/fullstack/state/20260324-积分功能.json",
+    "events": ".helloagents/fullstack/events/20260324-积分功能.ndjson",
+    "errors": ".helloagents/fullstack/errors/20260324-积分功能.ndjson",
+    "handoff": ".helloagents/fullstack/handoff/20260324-积分功能.be-java-core.result.json"
+  },
   "depends_on": [],
   "context": {
     "requirement": "用户下单时增加积分抵扣功能",
@@ -91,6 +98,10 @@ Task(
   prompt="[跳过指令] 直接执行以下任务。
     任务ID: T1
     项目: ./backend/user-service
+    本地运行态: .helloagents/fullstack/state/20260324-积分功能.json
+    事件日志: .helloagents/fullstack/events/20260324-积分功能.ndjson
+    错误日志: .helloagents/fullstack/errors/20260324-积分功能.ndjson
+    交付回写: .helloagents/fullstack/handoff/20260324-积分功能.be-java-core.result.json
     描述: 实现用户积分查询和扣减接口
     上下文: {API 契约、需求详情}
     返回: ResultMessage 格式"
@@ -111,6 +122,13 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 - `@auto` 会自动解析到全局 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/current.json`
 - 仅当未配置全局根目录时才回退到 `{KB_ROOT}/fullstack/tasks/current.json`
 - 未先执行 `create` 就开始派发，视为协议违规，会导致任务状态、summary、report 全部缺失
+- `create` 必须同时为每个任务写入目标项目的本地任务投影：
+  - `{project}/.helloagents/fullstack/inbox/{task_group_id}.{engineer_id}.task.json`
+  - `{project}/.helloagents/fullstack/state/{task_group_id}.json`
+  - `{project}/.helloagents/fullstack/events/{task_group_id}.ndjson`
+  - `{project}/.helloagents/fullstack/errors/{task_group_id}.ndjson`
+  - `{project}/.helloagents/fullstack/handoff/{task_group_id}.{engineer_id}.result.json`
+- 全局运行态是调度事实源；项目本地投影是工程师执行事实源。禁止把所有工程师细节只写在发起项目下。
 - `create` 前生成的 `tasks_json` 必须带上任务组级 `required_artifacts`：
   - `fullstack/docs/tasks.md`
   - `fullstack/docs/agents.md`
@@ -124,6 +142,7 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 - 收集问题（issues）
 - 同步技术文档到下游项目
 - 更新全局进度
+- 校验每个 ResultMessage 是否包含本地运行态更新摘要；缺失时要求工程师补写本地 state/events/errors/handoff
 - 检查 `artifact_status.missing`，缺失时继续推动补文档，不得提前宣告 fullstack 完成
 
 ```bash
@@ -223,3 +242,4 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 3. **单向通信**: 工程师只接收主代理消息，不互相通信
 4. **实时反馈**: 每个任务完成后立即更新状态
 5. **知识库隔离**: 各项目独立知识库，不共享
+6. **双层落盘**: 全局目录保存编排状态；每个工程师项目保存自己的任务、状态变更、错误和交付记录

@@ -24,6 +24,7 @@ function routeExplicitCommand({
   settings,
   resolveCanonicalCommandSkill,
   writeRouteContext,
+  writeTurnTiming,
   appendReplayEvent,
   buildRouteInstruction,
   suppress,
@@ -37,6 +38,11 @@ function routeExplicitCommand({
     cwd,
     skillName: canonicalSkillName,
     sourceSkillName: skillName,
+  })
+  writeTurnTiming?.({
+    cwd,
+    prompt,
+    source: 'command-route',
   })
   appendReplayEvent(cwd, {
     host,
@@ -66,6 +72,7 @@ export function handleRouteCommand({
   buildSemanticRouteInstruction,
   resolveCanonicalCommandSkill,
   writeRouteContext,
+  writeTurnTiming,
   clearRouteContext,
   appendReplayEvent,
   getWorkflowRecommendation,
@@ -89,6 +96,7 @@ export function handleRouteCommand({
     settings,
     resolveCanonicalCommandSkill,
     writeRouteContext,
+    writeTurnTiming,
     appendReplayEvent,
     buildRouteInstruction,
     suppress,
@@ -99,6 +107,11 @@ export function handleRouteCommand({
   const bootstrapFile = resolveBootstrapFile(cwd, settings.install_mode)
   if (bootstrapFile === 'bootstrap.md') {
     clearRouteContext()
+    writeTurnTiming?.({
+      cwd,
+      prompt,
+      source: 'semantic-route',
+    })
     appendReplayEvent(cwd, {
       host,
       event: 'semantic_route_prompted',

@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { appendReplayEvent } from './replay-state.mjs'
@@ -239,6 +239,15 @@ function main() {
   }))
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+function isCliEntrypoint() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+  } catch {
+    return normalize(resolve(fileURLToPath(import.meta.url))) === normalize(resolve(process.argv[1]))
+  }
+}
+
+if (isCliEntrypoint()) {
   main()
 }

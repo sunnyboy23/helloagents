@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 
 import { ensureRuntimeDirs, getCurrentStateFile } from './fullstack-runtime-store.mjs'
 
@@ -33,6 +33,11 @@ function readJsonFile(filePath, fallback = {}) {
 function writeJsonFile(filePath, value) {
   mkdirSync(dirname(filePath), { recursive: true })
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8')
+}
+
+function appendJsonLine(filePath, value) {
+  mkdirSync(dirname(filePath), { recursive: true })
+  appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf-8')
 }
 
 function normalizeArtifactKey(value) {
@@ -128,6 +133,58 @@ function computeExecutionLayers(tasks) {
   }
 
   return layers
+}
+
+function localFullstackRoot(projectPath) {
+  return join(resolve(projectPath), '.helloagents', 'fullstack')
+}
+
+function buildLocalRuntimePaths(projectPath, taskGroupId, engineerId) {
+  const root = localFullstackRoot(projectPath)
+  const safeEngineerId = String(engineerId || 'unassigned').replace(/[^\w.-]+/gu, '_')
+  const fileBase = `${taskGroupId}.${safeEngineerId}`
+  return {
+    root,
+    inbox: join(root, 'inbox', `${fileBase}.task.json`),
+    state: join(root, 'state', `${taskGroupId}.json`),
+    events: join(root, 'events', `${taskGroupId}.ndjson`),
+    errors: join(root, 'errors', `${taskGroupId}.ndjson`),
+    handoff: join(root, 'handoff', `${fileBase}.result.json`),
+  }
+}
+
+function toProjectRelative(projectPath, filePath) {
+  return relative(resolve(projectPath), filePath).replace(/\\/gu, '/')
+}
+
+function buildLocalTaskProjection(task, groupState, paths) {
+  return {
+    task_id: task.task_id,
+    task_group_id: groupState.task_group_id,
+    requirement: groupState.requirement || '',
+    engineer_id: task.engineer_id,
+    project: task.project,
+    description: task.description,
+    depends_on: task.depends_on || [],
+    status: task.status || 'pending',
+    retry_count: task.retry_count || 0,
+    started_at: task.started_at || null,
+    completed_at: task.completed_at || null,
+    task_contract: task.task_contract || {},
+    role_activation: task.role_activation || {},
+    context: task.context || {},
+    local_runtime: {
+      inbox: toProjectRelative(task.project, paths.inbox),
+      state: toProjectRelative(task.project, paths.state),
+      events: toProjectRelative(task.project, paths.events),
+      errors: toProjectRelative(task.project, paths.errors),
+      handoff: toProjectRelative(task.project, paths.handoff),
+    },
+    global_runtime: {
+      state_file: groupState.global_runtime?.state_file || '',
+    },
+    updated_at: groupState.updated_at || nowIso(),
+  }
 }
 
 function deriveVerificationStatus(task, result, status) {
@@ -357,6 +414,63 @@ export class TaskStore {
     writeJsonFile(this.stateFile, this.state)
   }
 
+  buildLocalRuntime(task) {
+    if (!task?.project || !this.state.task_group_id) return null
+    const paths = buildLocalRuntimePaths(task.project, this.state.task_group_id, task.engineer_id)
+    return {
+      root: paths.root,
+      inbox: paths.inbox,
+      state: paths.state,
+      events: paths.events,
+      errors: paths.errors,
+      handoff: paths.handoff,
+    }
+  }
+
+  writeLocalProjection(taskId, eventType, details = {}) {
+    const task = this.state.tasks?.[taskId]
+    if (!task?.project) return null
+
+    const paths = buildLocalRuntimePaths(task.project, this.state.task_group_id, task.engineer_id)
+    const projection = buildLocalTaskProjection(task, this.state, paths)
+    const event = {
+      event_type: eventType,
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      engineer_id: task.engineer_id,
+      project: task.project,
+      status: task.status || 'pending',
+      occurred_at: nowIso(),
+      details,
+    }
+
+    writeJsonFile(paths.inbox, projection)
+    writeJsonFile(paths.state, projection)
+    appendJsonLine(paths.events, event)
+
+    if (['failed', 'blocked'].includes(task.status) || details.error) {
+      appendJsonLine(paths.errors, {
+        ...event,
+        error: details.error || task.error || 'Task blocked or failed',
+      })
+    }
+
+    task.local_runtime = {
+      inbox: paths.inbox,
+      state: paths.state,
+      events: paths.events,
+      errors: paths.errors,
+      handoff: paths.handoff,
+    }
+    return task.local_runtime
+  }
+
+  syncAllLocalProjections(eventType = 'task_projection_synced') {
+    Object.keys(this.state.tasks || {}).forEach((taskId) => {
+      this.writeLocalProjection(taskId, eventType)
+    })
+  }
+
   createTaskGroup(taskGroupId, requirement, tasks, requiredArtifacts = null) {
     const tasksDict = {}
     tasks.forEach((task) => {
@@ -402,8 +516,22 @@ export class TaskStore {
       tech_docs_synced: [],
       required_artifacts: artifacts,
       artifact_scaffold: scaffold,
+      global_runtime: {
+        state_file: this.stateFile,
+        event_log: join(dirname(this.stateFile), 'events.ndjson'),
+        error_log: join(dirname(this.stateFile), 'errors.ndjson'),
+      },
       summary: {},
     }
+    this.saveState()
+    this.syncAllLocalProjections('task_created')
+    appendJsonLine(this.state.global_runtime.event_log, {
+      event_type: 'task_group_created',
+      task_group_id: taskGroupId,
+      total_tasks: tasks.length,
+      occurred_at: nowIso(),
+      state_file: this.stateFile,
+    })
     this.saveState()
     return {
       success: true,
@@ -411,6 +539,10 @@ export class TaskStore {
       total_tasks: tasks.length,
       layers: this.state.execution_layers.length,
       artifact_scaffold: scaffold,
+      global_runtime: this.state.global_runtime,
+      local_runtimes: Object.fromEntries(
+        Object.entries(this.state.tasks || {}).map(([taskId, task]) => [taskId, task.local_runtime || null]),
+      ),
     }
   }
 
@@ -518,6 +650,16 @@ export class TaskStore {
       const depTask = this.state.tasks?.[dependency]
       if (depTask && !['completed', 'skipped'].includes(depTask.status)) {
         task.status = 'blocked'
+        this.writeLocalProjection(taskId, 'task_blocked', { blocked_by: dependency })
+        appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+          event_type: 'task_blocked',
+          task_group_id: this.state.task_group_id,
+          task_id: taskId,
+          engineer_id: task.engineer_id,
+          project: task.project,
+          blocked_by: dependency,
+          occurred_at: nowIso(),
+        })
         this.saveState()
         return false
       }
@@ -526,6 +668,15 @@ export class TaskStore {
     task.status = 'in_progress'
     task.started_at = nowIso()
     this.updateProgress()
+    this.writeLocalProjection(taskId, 'task_started')
+    appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+      event_type: 'task_started',
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      engineer_id: task.engineer_id,
+      project: task.project,
+      occurred_at: task.started_at,
+    })
     this.saveState()
     return true
   }
@@ -547,6 +698,32 @@ export class TaskStore {
 
     this.updateLayerStatus(taskId)
     this.updateProgress()
+    this.writeLocalProjection(taskId, `task_${status}`, { result, error: task.error })
+    appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+      event_type: `task_${status}`,
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      engineer_id: task.engineer_id,
+      project: task.project,
+      occurred_at: task.completed_at,
+      result,
+    })
+    if (status === 'failed') {
+      appendJsonLine(this.state.global_runtime?.error_log || join(dirname(this.stateFile), 'errors.ndjson'), {
+        event_type: 'task_failed',
+        task_group_id: this.state.task_group_id,
+        task_id: taskId,
+        engineer_id: task.engineer_id,
+        project: task.project,
+        occurred_at: task.completed_at,
+        error: task.error,
+      })
+    }
+    Object.entries(this.state.tasks || {}).forEach(([downstreamId, downstreamTask]) => {
+      if (downstreamTask.status === 'blocked') {
+        this.writeLocalProjection(downstreamId, 'task_blocked', { blocked_by: taskId })
+      }
+    })
     this.saveState()
     return true
   }
@@ -565,6 +742,16 @@ export class TaskStore {
     delete task.error
     delete task.completed_at
     this.updateProgress()
+    this.writeLocalProjection(taskId, 'task_retry_scheduled', { retry_count: task.retry_count })
+    appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+      event_type: 'task_retry_scheduled',
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      engineer_id: task.engineer_id,
+      project: task.project,
+      retry_count: task.retry_count,
+      occurred_at: nowIso(),
+    })
     this.saveState()
     return true
   }
@@ -578,6 +765,7 @@ export class TaskStore {
         engineer_id: task.engineer_id,
         project: task.project,
         description: task.description,
+        local_runtime: task.local_runtime || null,
       }))
   }
 
@@ -619,6 +807,7 @@ export class TaskStore {
       verification: this.state.verification || {},
       closeout: this.state.closeout || {},
       artifact_status: this.state.artifact_status || {},
+      global_runtime: this.state.global_runtime || {},
       current_layer: this.getCurrentLayerInfo(),
       tech_docs_synced: (this.state.tech_docs_synced || []).length,
       summary: this.state.summary || {},
@@ -644,6 +833,7 @@ export class TaskStore {
         engineer_id: task.engineer_id,
         project: task.project,
         description: task.description,
+        local_runtime: task.local_runtime || null,
       })
     })
 
@@ -654,6 +844,7 @@ export class TaskStore {
       verification: this.state.verification || {},
       closeout: this.state.closeout || {},
       artifact_status: this.state.artifact_status || {},
+      global_runtime: this.state.global_runtime || {},
       current_layer: this.getCurrentLayerInfo(),
       tasks_by_status: byStatus,
       summary: this.state.summary || {},

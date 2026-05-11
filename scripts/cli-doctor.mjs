@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_CONFIG_HEADER, CODEX_PLUGIN_NAME } from './cli-codex.mjs'
@@ -335,6 +335,7 @@ function parseDoctorArgs(args) {
   }
   return { host, wantsJson }
 }
+
 
 function inspectDoctorHost(host, settings) {
   if (host === 'claude') return inspectClaudeDoctor(settings)

@@ -25,7 +25,7 @@ Thumbs.db
 
 # Project
 /.helloagents
-docs/
+/docs
 COMMIT_MESSAGE.md
 .claude/settings.local.json
 %TEMP%updater_committed.py

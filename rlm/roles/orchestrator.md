@@ -84,7 +84,9 @@
        - fullstack/docs/agents.md
        - fullstack/docs/upstream.md
      - 后端接口/数据模型/跨服务依赖变更任务的 `task_contract.required_artifacts` 必须补 `.helloagents/docs/{feature}_technical_solution.md`
-  5. 生成任务列表写入运行态任务目录（默认 fullstack/tasks/，可由 FULLSTACK_RUNTIME_ROOT 重定向）
+     - create 必须返回并写入每个任务的 `local_runtime`，包含目标项目内 inbox/state/events/errors/handoff
+  5. 生成任务列表写入全局运行态任务目录（默认 FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/，仅未配置全局根目录时回退项目 KB）
+  6. 同步为每个目标项目写入本地任务投影，禁止把所有工程师的执行细节只落在发起项目下
 输出: 任务列表（含 DAG）
 ```
 
@@ -108,7 +110,7 @@
   1. 拓扑排序计算层级
   2. 从 Layer 1 开始：
      - 同层任务并发派发（≤6 并发）
-     - 构造 TaskMessage（含 role_activation）
+     - 构造 TaskMessage（含 role_activation、global_runtime、local_runtime）
      - 每个任务派发前调用 `helloagents fullstack start {task_id}`
      - 调用 Task 工具派发给工程师子代理
   3. 等待同层全部完成
@@ -123,6 +125,8 @@
 - 所有状态命令统一使用 `@auto`
 - `@auto` 优先写入 `FULLSTACK_RUNTIME_ROOT/{project_hash}/fullstack/tasks/current.json`
 - 禁止在协议中再硬编码 `'{KB_ROOT}/fullstack/tasks/current.json'`
+- 全局运行态只做编排事实源，项目本地 `.helloagents/fullstack/` 做工程师执行事实源
+- 每次 start/feedback/fail/retry 都必须同步目标项目本地 state，并追加 events；失败/阻塞必须追加 errors
 
 ### 5. 结果汇总
 
@@ -133,7 +137,8 @@
   2. 收集问题（issues）
   3. 同步技术文档（tech_docs → 下游项目）
   4. 更新全局进度
-  5. 检查 artifact_status.missing，缺失时不得把任务组标为可收尾
+  5. 校验工程师 ResultMessage 是否包含 `local_runtime` 更新摘要，必要时要求补写本地 handoff
+  6. 检查 artifact_status.missing，缺失时不得把任务组标为可收尾
 输出: 执行报告
 ```
 
@@ -148,6 +153,16 @@
   "engineer_id": "be-java-core",
   "project": "./backend/user-service",
   "description": "实现用户积分查询和扣减接口",
+  "local_runtime": {
+    "inbox": ".helloagents/fullstack/inbox/20260324-积分功能.be-java-core.task.json",
+    "state": ".helloagents/fullstack/state/20260324-积分功能.json",
+    "events": ".helloagents/fullstack/events/20260324-积分功能.ndjson",
+    "errors": ".helloagents/fullstack/errors/20260324-积分功能.ndjson",
+    "handoff": ".helloagents/fullstack/handoff/20260324-积分功能.be-java-core.result.json"
+  },
+  "global_runtime": {
+    "state_file": "~/.helloagents/fullstack/{project_hash}/fullstack/tasks/current.json"
+  },
   "depends_on": [],
   "context": {
     "requirement": "用户下单时增加积分抵扣功能",
@@ -168,6 +183,11 @@
   "task_id": "T1",
   "engineer_id": "be-java-core",
   "status": "completed",
+  "local_runtime": {
+    "state": ".helloagents/fullstack/state/20260324-积分功能.json",
+    "events": ".helloagents/fullstack/events/20260324-积分功能.ndjson",
+    "handoff": ".helloagents/fullstack/handoff/20260324-积分功能.be-java-core.result.json"
+  },
   "changes": [...],
   "self_review": { "score": 8, "passed": true },
   "kb_updates": [...],

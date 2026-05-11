@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -9,6 +10,7 @@ import {
   createTempDir,
   writeJson,
   runNode,
+  readText,
   writeText,
 } from './helpers/test-env.mjs'
 import { getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
@@ -86,6 +88,7 @@ test('codex notify gates only main complete turns from turn-state', () => {
       role: 'main',
       kind: 'waiting',
       phase: 'plan',
+      taskSummary: '审计支付链路风险',
       reasonCategory: 'missing-input',
       reason: '用户尚未给出当前审计范围。',
     }),
@@ -110,6 +113,7 @@ test('codex notify gates only main complete turns from turn-state', () => {
       role: 'main',
       kind: 'complete',
       phase: 'consolidate',
+      taskSummary: '完成支付链路审计',
     }),
   })
   parseStdoutJson(result)
@@ -144,6 +148,132 @@ test('codex notify gates only main complete turns from turn-state', () => {
     env,
   })
   assert.equal(result.stdout, '')
+})
+
+test('fullstack closeout blocks completion without task store evidence', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const env = buildHomeEnv(home)
+  const project = createTempDir('helloagents-fullstack-gate-missing-')
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+
+  writeSettings(home, { output_format: true })
+
+  let result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: '~fullstack 完善指标采集三个核心看板' }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      role: 'main',
+      kind: 'complete',
+      phase: 'verify',
+      taskSummary: '完善指标采集三个核心看板',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(notifyScript, ['codex-notify', JSON.stringify({
+    type: 'agent-turn-complete',
+    client: 'codex-tui',
+    cwd: project,
+    durationMs: 103000,
+    'last-assistant-message': '完成指标看板',
+  })], {
+    cwd: project,
+    env,
+  })
+  const payload = parseStdoutJson(result)
+  assert.equal(payload.decision, 'block')
+  assert.match(payload.reason, /Fullstack Gate/)
+  assert.match(payload.reason, /缺少 fullstack 当前任务状态/)
+})
+
+test('fullstack closeout allows completion with task store evidence', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const env = buildHomeEnv(home)
+  const project = createTempDir('helloagents-fullstack-gate-ready-')
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+  const taskGroupId = '202605070901_metrics_dashboards'
+  const localProject = join(project, 'dashboard')
+  const inbox = join(localProject, '.helloagents', 'fullstack', 'inbox', `${taskGroupId}.be-nodejs-main.task.json`)
+  const localState = join(localProject, '.helloagents', 'fullstack', 'state', `${taskGroupId}.json`)
+  const globalEventLog = join(project, '.helloagents', 'fullstack', 'tasks', 'events.ndjson')
+
+  writeSettings(home, { output_format: true })
+  writeText(join(project, '.helloagents', 'fullstack', 'docs', 'tasks.md'), '# tasks\n')
+  writeText(join(project, '.helloagents', 'fullstack', 'docs', 'agents.md'), '# agents\n')
+  writeText(join(project, '.helloagents', 'fullstack', 'docs', 'upstream.md'), '# upstream\n')
+  writeJson(inbox, { task_id: 'T1', task_group_id: taskGroupId })
+  writeJson(localState, { task_id: 'T1', status: 'completed' })
+  writeText(globalEventLog, `${JSON.stringify({
+    event_type: 'task_completed',
+    task_group_id: taskGroupId,
+    task_id: 'T1',
+  })}\n`)
+  writeJson(join(project, '.helloagents', 'fullstack', 'tasks', 'current.json'), {
+    task_group_id: taskGroupId,
+    status: 'completed',
+    global_runtime: {
+      event_log: globalEventLog,
+    },
+    tasks: {
+      T1: {
+        task_id: 'T1',
+        engineer_id: 'be-nodejs-main',
+        project: localProject,
+        description: '完善指标采集三个核心看板',
+        status: 'completed',
+        local_runtime: {
+          inbox,
+          state: localState,
+        },
+      },
+    },
+  })
+
+  let result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: '~fullstack 完善指标采集三个核心看板' }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      role: 'main',
+      kind: 'complete',
+      phase: 'verify',
+      taskSummary: '完善指标采集三个核心看板',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(notifyScript, ['codex-notify', JSON.stringify({
+    type: 'agent-turn-complete',
+    client: 'codex-tui',
+    cwd: project,
+    durationMs: 103000,
+    'last-assistant-message': '完成指标看板',
+  })], {
+    cwd: project,
+    env,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+
+  assert.equal(existsSync(join(home, '.helloagents', 'runtime', 'turn-state.json')), false)
 })
 
 test('stop allows structured waiting turn-state and clears it', () => {

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { appendReplayEvent } from './replay-state.mjs'
 
 const TURN_STATE_PATH = join(homedir(), '.helloagents', 'runtime', 'turn-state.json')
-const TURN_STATE_TTL_MS = 30 * 60 * 1000
+const TURN_STATE_TTL_MS = 4 * 60 * 60 * 1000
 const VALID_KINDS = new Set(['complete', 'waiting', 'blocked', 'progress'])
 const VALID_ROLES = new Set(['main', 'subagent'])
 const VALID_REASON_CATEGORIES = new Set([
@@ -58,6 +58,11 @@ function normalizeTurnState(input = {}) {
     ? input.reasonCategory.trim().toLowerCase()
     : ''
   const reason = typeof input.reason === 'string' ? input.reason.trim() : ''
+  const taskSummary = typeof input.taskSummary === 'string'
+    ? input.taskSummary.trim()
+    : typeof input.summary === 'string'
+      ? input.summary.trim()
+      : ''
 
   return {
     kind: VALID_KINDS.has(kind) ? kind : '',
@@ -67,6 +72,16 @@ function normalizeTurnState(input = {}) {
     requiresDeliveryGate: Boolean(input.requiresDeliveryGate),
     reasonCategory: VALID_REASON_CATEGORIES.has(reasonCategory) ? reasonCategory : '',
     reason,
+    taskSummary,
+    humanInterventionCount: Number.isFinite(Number(input.humanInterventionCount))
+      ? Math.max(0, Math.round(Number(input.humanInterventionCount)))
+      : undefined,
+    verifyRetryCount: Number.isFinite(Number(input.verifyRetryCount))
+      ? Math.max(0, Math.round(Number(input.verifyRetryCount)))
+      : undefined,
+    kbReuseCount: Number.isFinite(Number(input.kbReuseCount))
+      ? Math.max(0, Math.round(Number(input.kbReuseCount)))
+      : undefined,
   }
 }
 
@@ -192,6 +207,15 @@ function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+function isCliEntrypoint() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+  } catch {
+    return normalizePath(fileURLToPath(import.meta.url)) === normalizePath(process.argv[1])
+  }
+}
+
+if (isCliEntrypoint()) {
   main()
 }

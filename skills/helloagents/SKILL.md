@@ -114,6 +114,7 @@ Layer 3 — 资源文件（技能内引用时读取）：
 - `~verify`
 - `~commit`
 - `~clean`
+- `~fullstack`
 - `~help`
 
 兼容别名：

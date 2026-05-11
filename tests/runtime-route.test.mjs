@@ -7,6 +7,7 @@ import {
   createHomeFixture,
   createPackageFixture,
   createTempDir,
+  readText,
   runNode,
   writeText,
 } from './helpers/test-env.mjs'
@@ -58,6 +59,7 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   })
   payload = parseStdoutJson(result)
   assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]fullstack[\\/]SKILL\.md/)
+  assert.match(readText(join(home, '.helloagents', 'runtime', 'turn-timing.json')), /~fullstack status/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,

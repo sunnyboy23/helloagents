@@ -29,6 +29,24 @@
       "enum": ["pending", "in_progress", "completed", "partial", "failed", "cancelled"],
       "description": "任务组整体状态"
     },
+    "global_runtime": {
+      "type": "object",
+      "description": "全局运行态位置。作为 fullstack 编排事实源，保存总任务、事件与错误聚合。",
+      "properties": {
+        "state_file": {
+          "type": "string",
+          "description": "全局 current.json 路径"
+        },
+        "event_log": {
+          "type": "string",
+          "description": "全局事件日志 NDJSON 路径"
+        },
+        "error_log": {
+          "type": "string",
+          "description": "全局错误日志 NDJSON 路径"
+        }
+      }
+    },
     "progress": {
       "type": "object",
       "description": "进度统计",
@@ -169,6 +187,32 @@
           "minimum": 0,
           "default": 0,
           "description": "重试次数"
+        },
+        "local_runtime": {
+          "type": "object",
+          "description": "工程师项目内的任务投影与执行日志位置。工程师 Agent 必须在对应项目内维护这些文件。",
+          "properties": {
+            "inbox": {
+              "type": "string",
+              "description": "目标项目内任务投递文件"
+            },
+            "state": {
+              "type": "string",
+              "description": "目标项目内任务状态快照"
+            },
+            "events": {
+              "type": "string",
+              "description": "目标项目内状态变更事件 NDJSON"
+            },
+            "errors": {
+              "type": "string",
+              "description": "目标项目内错误记录 NDJSON"
+            },
+            "handoff": {
+              "type": "string",
+              "description": "目标项目内工程师交付结果文件"
+            }
+          }
         }
       }
     },

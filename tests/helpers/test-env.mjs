@@ -26,7 +26,7 @@ const PACKAGE_FIXTURE_ENTRIES = [
 ];
 
 export function createTempDir(prefix = 'helloagents-test-') {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }
 
 export function createPackageFixture() {
@@ -89,6 +89,7 @@ export function buildHomeEnv(home) {
     HOMEDRIVE: parsed.root.replace(/[\\/]+$/, ''),
     HOMEPATH: home.slice(parsed.root.length - 1),
     HELLOAGENTS_NOTIFY_SESSION_ID: '',
+    HELLOAGENTS_HOME: join(home, '.helloagents'),
     WT_SESSION: '',
     TERM_SESSION_ID: '',
     KITTY_WINDOW_ID: '',

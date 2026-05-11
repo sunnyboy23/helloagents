@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -37,7 +37,14 @@ function buildTasksPayload(projectRoot) {
 
 test('TaskStore createTaskGroup scaffolds docs and writes current state', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ha-fullstack-task-'))
+  const previousHome = process.env.HELLOAGENTS_HOME
   try {
+    process.env.HELLOAGENTS_HOME = join(dir, 'home', '.helloagents')
+    mkdirSync(process.env.HELLOAGENTS_HOME, { recursive: true })
+    writeFileSync(join(process.env.HELLOAGENTS_HOME, 'helloagents.json'), JSON.stringify({}), {
+      encoding: 'utf-8',
+      flag: 'w',
+    })
     const projectRoot = join(dir, 'project')
     const kbRoot = join(projectRoot, '.helloagents')
     const stateFile = join(kbRoot, 'fullstack', 'tasks', 'current.json')
@@ -56,8 +63,14 @@ test('TaskStore createTaskGroup scaffolds docs and writes current state', () => 
     assert.equal(existsSync(join(kbRoot, 'fullstack', 'docs', 'tasks.md')), true)
     assert.equal(existsSync(join(kbRoot, 'fullstack', 'docs', 'agents.md')), true)
     assert.equal(existsSync(join(kbRoot, 'fullstack', 'docs', 'upstream.md')), true)
+    assert.equal(existsSync(join(projectRoot, 'order-service', '.helloagents', 'fullstack', 'inbox', '20260421-order-risk.be-java-main.task.json')), true)
+    assert.equal(existsSync(join(projectRoot, 'report-service', '.helloagents', 'fullstack', 'state', '20260421-order-risk.json')), true)
+    assert.equal(existsSync(join(kbRoot, 'fullstack', 'tasks', 'events.ndjson')), true)
     assert.equal(store.getStatusSummary().progress.total, 2)
+    assert.ok(store.state.tasks.T1.local_runtime.state.endsWith('.helloagents/fullstack/state/20260421-order-risk.json'))
   } finally {
+    if (previousHome === undefined) delete process.env.HELLOAGENTS_HOME
+    else process.env.HELLOAGENTS_HOME = previousHome
     rmSync(dir, { recursive: true, force: true })
   }
 })
@@ -92,6 +105,11 @@ test('TaskStore startTask and processFeedback advance DAG and summary', () => {
     assert.equal(feedback.triggered_tasks[0].task_id, 'T2')
     assert.equal(store.getStatusSummary().verification.passed, 1)
     assert.equal(store.getStatusSummary().closeout.ready, 1)
+
+    const eventsPath = join(projectRoot, 'order-service', '.helloagents', 'fullstack', 'events', '20260421-order-risk.ndjson')
+    const events = readFileSync(eventsPath, 'utf-8')
+    assert.match(events, /"event_type":"task_started"/)
+    assert.match(events, /"event_type":"task_completed"/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -111,6 +129,8 @@ test('TaskStore failTask blocks downstream and retryTask resets failed task', ()
     assert.equal(store.failTask('T1', 'boom'), true)
     assert.equal(store.state.tasks.T1.status, 'failed')
     assert.equal(store.state.tasks.T2.status, 'blocked')
+    assert.equal(existsSync(join(projectRoot, 'order-service', '.helloagents', 'fullstack', 'errors', '20260421-order-risk.ndjson')), true)
+    assert.equal(existsSync(join(projectRoot, 'report-service', '.helloagents', 'fullstack', 'errors', '20260421-order-risk.ndjson')), true)
 
     assert.equal(store.retryTask('T1'), true)
     assert.equal(store.state.tasks.T1.status, 'pending')

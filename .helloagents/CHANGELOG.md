@@ -11,6 +11,12 @@
   - 决策: fullstack-share-redesign#D001(采用机制拆解型结构替换介绍型叙事)
 
 ### 快速修改
+- **[fullstack-docs]**: 基于当前 Node.js/ESM 实现重写全栈模式设计文档，改用“统一入口层 / 存储与配置层 / 归属与影响分析层 / 任务组运行态层 / KB 与文档同步层 / 收尾把关层”主线，明确 `current.json`、dispatch contract、artifact/verification/closeout 聚合与 fullstack gate 的职责 `[类型: 文档]` — by Codex
+  - 文件: `docs/fullstack-mode-design.md`
+- **[non-fullstack-docs]**: 基于当前实现重写非全栈模式设计文档，改用“注入层 / 路由层 / 命令层 / 状态推荐层 / 交付证据层”主线，明确 bootstrap、command skills、workflow 快照与 `.ralph-*` 证据在单项目闭环中的职责 `[类型: 文档]` — by Codex
+  - 文件: `docs/non-fullstack-mode-design.md`
+- **[metrics-runtime]**: 按量化指标重构方案加固 metrics 本地落盘与上报链路，新增 O_APPEND 原子追加、写入/裁剪/汇总错误诊断、Claude Stop Hook fallback、turn-state 4 小时 TTL、doctor metrics 健康检查与回归测试 `[类型: 脚本+测试]` — by Codex
+  - 文件: `scripts/metrics-state.mjs`, `scripts/notify.mjs`, `scripts/turn-state.mjs`, `scripts/cli-config.mjs`, `scripts/cli-doctor.mjs`, `scripts/cli-doctor-render.mjs`, `tests/metrics-state.test.mjs`, `tests/runtime-turn-state.test.mjs`, `tests/doctor.test.mjs`
 - **[fullstack-share-ppt]**: 重写全栈模式分享演示稿，改为“以 fullstack 为主、非全栈为参照”的对比增强版，补充关键能力代码摘录与 X-Ray 实践案例，并同步更新提纲/讲稿/说明文件 `[类型: 文档+前端]` — by Codex
   - 文件: `docs/fullstack-mode-share/app.js`, `docs/fullstack-mode-share/styles.css`, `docs/fullstack-mode-share/outline.md`, `docs/fullstack-mode-share/speaker-notes.md`, `docs/fullstack-mode-share/README.md`
 - **[gitignore]**: 更新 `.gitignore`，新增 `docs/` 与 `tests/` 目录忽略规则，避免本地文档与测试目录默认进入待提交列表 `[类型: 配置]` — by Codex

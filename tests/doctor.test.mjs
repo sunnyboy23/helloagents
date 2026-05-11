@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -8,6 +8,7 @@ import {
   createHomeFixture,
   createPackageFixture,
   runNode,
+  writeJson,
   writeText,
 } from './helpers/test-env.mjs'
 

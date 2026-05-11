@@ -6,6 +6,7 @@ export const DEFAULTS = {
   notify_level: 0,
   ralph_loop_enabled: true,
   guard_enabled: true,
+
   kb_create_mode: 1,
   project_store_mode: 'local',
   commit_attribution: '',

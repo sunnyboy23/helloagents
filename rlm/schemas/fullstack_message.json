@@ -30,6 +30,26 @@
           "type": "string",
           "description": "任务描述"
         },
+        "local_runtime": {
+          "type": "object",
+          "description": "目标项目内的任务投影与运行态文件。工程师必须在自己的项目内读取/维护这些文件。",
+          "properties": {
+            "inbox": { "type": "string", "description": "任务投递文件，位于项目 .helloagents/fullstack/inbox/" },
+            "state": { "type": "string", "description": "任务状态快照，位于项目 .helloagents/fullstack/state/" },
+            "events": { "type": "string", "description": "状态变更事件 NDJSON，位于项目 .helloagents/fullstack/events/" },
+            "errors": { "type": "string", "description": "错误记录 NDJSON，位于项目 .helloagents/fullstack/errors/" },
+            "handoff": { "type": "string", "description": "工程师交付结果文件，位于项目 .helloagents/fullstack/handoff/" }
+          }
+        },
+        "global_runtime": {
+          "type": "object",
+          "description": "全局运行态文件位置，仅供回传引用，不替代项目本地落盘。",
+          "properties": {
+            "state_file": { "type": "string" },
+            "event_log": { "type": "string" },
+            "error_log": { "type": "string" }
+          }
+        },
         "depends_on": {
           "type": "array",
           "items": { "type": "string" },
@@ -91,6 +111,16 @@
           "type": "string",
           "enum": ["completed", "partial", "failed"],
           "description": "任务状态"
+        },
+        "local_runtime": {
+          "type": "object",
+          "description": "工程师项目内实际更新过的运行态文件。",
+          "properties": {
+            "state": { "type": "string" },
+            "events": { "type": "string" },
+            "errors": { "type": "string" },
+            "handoff": { "type": "string" }
+          }
         },
         "changes": {
           "type": "array",

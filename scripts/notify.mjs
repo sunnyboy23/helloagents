@@ -13,7 +13,7 @@ import { shouldIgnoreCodexNotifyClient } from './notify-events.mjs';
 import { runGateScript } from './notify-gates.mjs';
 import { handleRouteCommand, resolveBootstrapFile } from './notify-route.mjs';
 import { readSettings, readStdinJson, output, suppressedOutput, emptySuppress } from './notify-shared.mjs';
-import { clearRouteContext, writeRouteContext } from './runtime-context.mjs';
+import { clearRouteContext, writeRouteContext, writeTurnTiming } from './runtime-context.mjs';
 import { appendReplayEvent, startReplaySession } from './replay-state.mjs';
 import { clearTurnState, readTurnState } from './turn-state.mjs';
 import { getWorkflowRecommendation } from './workflow-state.mjs';
@@ -93,6 +93,19 @@ function runDeliveryGate(payload) {
   });
 }
 
+function runFullstackGate(payload) {
+  return runGateScript({
+    payload,
+    host: HOST,
+    scriptPath: join(__dirname, 'fullstack-gate.mjs'),
+    source: 'fullstack-gate',
+    blockEvent: 'fullstack_gate_blocked',
+    timeout: 30_000,
+    appendReplayEvent,
+    output,
+  });
+}
+
 function runTurnStopGate(payload) {
   return runGateScript({
     payload,
@@ -156,6 +169,7 @@ function cmdRoute() {
     buildSemanticRouteInstruction,
     resolveCanonicalCommandSkill,
     writeRouteContext,
+    writeTurnTiming,
     clearRouteContext,
     appendReplayEvent,
     getWorkflowRecommendation,
@@ -225,9 +239,16 @@ function cmdStop() {
     notifyByLevel('warning', buildNotifyExtra(payload));
     return;
   }
+  if (shouldProcess && runFullstackGate(payload)) {
+    consumeMainTurnState(cwd, turnState);
+    notifyByLevel('warning', buildNotifyExtra(payload));
+    return;
+  }
 
   const settings = getSettings();
   if (shouldProcess) {
+    notifyByLevel('complete', buildNotifyExtra(payload), settings);
+  } else if (!turnState) {
     notifyByLevel('complete', buildNotifyExtra(payload), settings);
   }
   consumeMainTurnState(cwd, turnState);
@@ -263,7 +284,10 @@ function cmdCodexNotify() {
     if (turnState && turnState.kind !== 'complete') consumeMainTurnState(cwd, turnState);
     return;
   }
-  if (!turnState) return;
+  if (!turnState) {
+    clearRouteContext();
+    return;
+  }
   if (turnState.kind !== 'complete') {
     consumeMainTurnState(cwd, turnState);
     clearRouteContext();
@@ -277,6 +301,11 @@ function cmdCodexNotify() {
     return;
   }
   if (runDeliveryGate(data)) {
+    consumeMainTurnState(cwd, turnState);
+    notifyByLevel('warning', buildNotifyExtra(data), settings);
+    return;
+  }
+  if (runFullstackGate(data)) {
     consumeMainTurnState(cwd, turnState);
     notifyByLevel('warning', buildNotifyExtra(data), settings);
     return;

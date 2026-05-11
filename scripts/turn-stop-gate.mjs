@@ -5,7 +5,7 @@ import { getApplicableRouteContext } from './runtime-context.mjs'
 import { readTurnState } from './turn-state.mjs'
 import { getWorkflowRecommendation } from './workflow-state.mjs'
 
-const ENFORCED_COMMANDS = new Set(['auto', 'loop'])
+const ENFORCED_COMMANDS = new Set(['auto', 'loop', 'fullstack'])
 const ALLOWED_STOP_REASON_CATEGORIES = [
   'ambiguity',
   'missing-input',
