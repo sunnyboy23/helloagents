@@ -32,6 +32,7 @@ import {
 import { initProjectKb } from './fullstack-kb-init.mjs'
 import { batchSyncFromResult, syncTechDoc, updateUpstreamIndex } from './fullstack-sync.mjs'
 import { TaskStore, loadTaskPayload, resolveStateFileArg } from './fullstack-task-store.mjs'
+import { scanDependencies, scanServiceCatalog } from './fullstack-dep-scan.mjs'
 
 function safeJsonString(value) {
   return `${JSON.stringify(value, null, 2)}\n`
@@ -39,7 +40,7 @@ function safeJsonString(value) {
 
 function printUsage() {
   process.stdout.write([
-    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|cross-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|sync|kb> ...',
+    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|cross-deps|scan-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|sync|kb> ...',
     "示例: helloagents fullstack runtime set-root '~/.helloagents/runtime' --create",
     '示例: helloagents fullstack runtime choose-root',
   ].join('\n') + '\n')
@@ -166,7 +167,7 @@ export async function handleFullstackCli(args = []) {
     return Boolean(result.success)
   }
 
-  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'cross-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'sync', 'kb'].includes(group)) {
+  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'cross-deps', 'scan-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'sync', 'kb'].includes(group)) {
     const configPath = resolveFullstackConfigFile({ projectRoot, kbRoot })
     const needsConfig = !['create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report'].includes(group)
     const config = needsConfig ? loadConfig(configPath) : null
@@ -178,6 +179,31 @@ export async function handleFullstackCli(args = []) {
         suggestion: 'Run `helloagents fullstack init` first.',
       }))
       return false
+    }
+
+    if (needsConfig && config && ['impact', 'dispatch-plan', 'cross-deps', 'ownership'].includes(group)) {
+      const allProjects = getAllProjects(config)
+      const paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+
+      const deps = config.service_dependencies || {}
+      const hasDeclaredDeps = Object.keys(deps).some((k) => (deps[k]?.depends_on || []).length > 0)
+      if (!hasDeclaredDeps && paths.length > 1) {
+        const scanResult = scanDependencies(paths)
+        if (scanResult.success && Object.keys(scanResult.service_dependencies).length > 0) {
+          config.service_dependencies = scanResult.service_dependencies
+          saveConfig(configPath, config)
+        }
+      }
+
+      const catalog = config.service_catalog || {}
+      const hasCatalogContent = Object.keys(catalog).some((k) => catalog[k]?.service_summary || (catalog[k]?.business_scope || []).length > 0)
+      if (!hasCatalogContent && paths.length > 0) {
+        const catalogResult = scanServiceCatalog(paths, catalog)
+        if (catalogResult.success && catalogResult.generated_count > 0) {
+          config.service_catalog = catalogResult.service_catalog
+          saveConfig(configPath, config)
+        }
+      }
     }
 
     if (group === 'projects') {
@@ -246,6 +272,26 @@ export async function handleFullstackCli(args = []) {
           }))
           return false
         }
+        const allProjects = getAllProjects(config)
+        const paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+        if (paths.length > 1) {
+          const scanResult = scanDependencies(paths)
+          if (scanResult.success && Object.keys(scanResult.service_dependencies).length > 0) {
+            config.service_dependencies = scanResult.service_dependencies
+            result.deps_scanned = true
+            result.deps_cycles = scanResult.cycles.length > 0
+          }
+        }
+        const catalog = config.service_catalog || {}
+        const boundPath = result.project?.path || projectPathArg
+        if (boundPath && !catalog[boundPath]?.service_summary) {
+          const catalogResult = scanServiceCatalog([boundPath], catalog)
+          if (catalogResult.success && catalogResult.generated_count > 0) {
+            config.service_catalog = catalogResult.service_catalog
+            result.catalog_generated = true
+          }
+        }
+        saveConfig(configPath, config)
       }
 
       process.stdout.write(safeJsonString(result))
@@ -312,6 +358,28 @@ export async function handleFullstackCli(args = []) {
     }
     if (group === 'cross-deps') {
       process.stdout.write(safeJsonString(analyzeCrossProjectDependencies(config, args.slice(1))))
+      return true
+    }
+    if (group === 'scan-deps') {
+      const applyFlag = args.includes('--apply')
+      const projectPaths = args.slice(1).filter((a) => a !== '--apply')
+      let paths = projectPaths
+      if (paths.length === 0) {
+        const allProjects = getAllProjects(config)
+        paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+        if (paths.length === 0) {
+          process.stdout.write(safeJsonString({ success: false, error: 'No bound projects found. Bind projects first.' }))
+          return false
+        }
+      }
+      const result = scanDependencies(paths)
+      if (applyFlag && result.success) {
+        config.service_dependencies = result.service_dependencies
+        const [saved, saveErr] = saveConfig(configPath, config)
+        result.applied = saved
+        if (!saved) result.apply_error = saveErr
+      }
+      process.stdout.write(safeJsonString(result))
       return true
     }
     if (group === 'ownership') {
@@ -533,6 +601,7 @@ export async function handleFullstackCli(args = []) {
       'impact',
       'dispatch-plan',
       'cross-deps',
+      'scan-deps',
       'ownership',
       'create',
       'status',
