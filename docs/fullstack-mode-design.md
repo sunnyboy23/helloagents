@@ -1,174 +1,105 @@
-# HelloAGENTS 全栈模式设计文档
+# HelloAGENTS 全栈模式最新设计说明
 
-> 文档类型：架构与设计说明（可对外分享）  
-> 版本：v2.0  
-> 状态：与当前 Node.js/ESM 实现对齐
+> 文档类型：架构与设计说明
+>  
+> 文档目标：基于当前仓库实现，重新梳理 HelloAGENTS 全栈模式的真实职责边界、运行时模型与跨项目编排链路
+>  
+> 适用范围：显式 `~fullstack` / `~fs` 流程，以及 `helloagents fullstack ...` CLI 子命令
 
-## 1. 背景与目标
+## 1. 先说结论：今天的全栈模式到底是什么
 
-### 1.1 背景
+当前 HelloAGENTS 的全栈模式，不是“把非全栈模式放大一点”，也不是旧时代那种以 Python 内核、分散状态文件和项目内配置为中心的实现。
 
-一个真实需求经常会同时影响多个项目，例如：
+它现在更准确的定义是：
 
-- Web 前端
-- BFF / Node 服务
-- Java / Python / Go 后端服务
-- iOS / Android / 鸿蒙客户端
+- 一个建立在非全栈单项目引擎之上的**跨项目编排层**
+- 以 `scripts/fullstack-cli.mjs` 作为统一入口
+- 以 `fullstack-runtime-store.mjs` / `fullstack-config-store.mjs` 管理运行态根目录与配置
+- 以 `fullstack-impact.mjs` 完成服务归属判断、影响扩散、依赖分析与派发计划生成
+- 以 `fullstack-task-store.mjs` 维护任务组单状态入口 `current.json`
+- 以 `fullstack-kb-init.mjs` 和 `fullstack-sync.mjs` 完成项目 KB 补齐与技术文档同步
+- 以 `fullstack-gate.mjs` 保证显式全栈流程在缺少运行态证据时不能伪造“已完成”
 
-如果仍按单项目、单代理、串行任务来处理，会持续遇到这些问题：
+如果用一句话概括：
 
-- 需求先落到哪个项目不清楚，服务归属容易误判
-- 多项目依赖难以在一个视角里表达
-- 上游完成后，下游何时可以启动缺少统一状态入口
-- 技术文档同步依赖人工提醒，容易滞后
-- 多项目同时开发时，项目内 runtime 容易和 Git 工作树互相干扰
+> 全栈模式是 HelloAGENTS 的**多项目协作编排运行时**，负责回答“需求该落到哪些项目、谁先做、谁后做、如何派发、如何汇总状态、如何同步文档，以及什么时候真正允许收尾”。
 
-全栈模式（`~fullstack` / `helloagents fullstack ...`）的目标，就是在不破坏普通模式的前提下，为多项目协作补上一层“服务归属分析 + 影响扩散 + DAG 派发 + 运行态汇总 + 文档同步”的编排能力。
+## 2. 它解决的核心问题是什么
 
-### 1.2 目标
+全栈模式针对的是单项目流程无法覆盖的跨项目协作问题。
 
-- 支持工程师角色与项目绑定
-- 支持基于 `service_catalog` 的服务归属分析
-- 支持跨项目依赖分析与拓扑层级调度
-- 支持按项目生成可派发任务契约，而不是只派自然语言
-- 支持通过单个运行态文件追踪当前需求全过程
-- 支持必需交付物、验证状态、收尾状态统一汇总
-- 支持项目知识库自动补齐与初始化
-- 支持技术文档向依赖项目同步
+典型场景包括：
 
-### 1.3 非目标
+- 一个需求同时影响前端、BFF、后端和移动端
+- 同一个能力分布在多个仓库，不知道应该先改哪一个项目
+- 上下游项目之间有依赖，但缺少统一的执行顺序视图
+- 技术文档需要跨项目同步，否则下游无法稳定接手
+- 多个项目同时推进时，状态、交付物和阻塞信息难以集中汇总
 
-- 不替代 `~auto / ~plan / ~exec` 的通用工作流
-- 不把所有项目状态长期沉淀成多份 runtime 历史
-- 不引入跨工程师共享上下文记忆
-- 不改变非全栈模式默认行为
+因此，全栈模式要解决的不是“项目内部怎么写代码”，而是：
 
-## 2. 当前实现概览
+- 哪些项目应参与本次需求
+- 哪个项目是 owner service
+- 哪些项目是受影响项目
+- 各项目的先后依赖是什么
+- 派发时应附带什么验证和交付契约
+- 任务组推进到哪一步时才允许真正完成
 
-当前 fullstack 已完成从旧 Python 内核到 Node.js/ESM 的迁移，真实实现以这些脚本为核心：
+## 3. 全栈模式与非全栈模式的关系
+
+全栈模式不是替代非全栈模式，而是在其之上新增一层跨项目编排能力。
+
+两者的职责边界可以概括为：
+
+- **非全栈模式**：解决单项目内的规划、实现、验证、收尾
+- **全栈模式**：解决跨项目的归属分析、依赖排序、派发、汇总、同步与全局收尾判断
+
+因此正确的心智模型不是“全栈取代非全栈”，而是：
+
+- 全栈决定**哪些项目应该参与以及如何协作**
+- 各项目内部仍由各自的非全栈流程完成落地
+
+## 4. 当前全栈模式的总体架构
+
+从当前代码视角看，全栈模式可以拆成 6 层：
+
+1. **统一入口层**：负责接收 `~fullstack` 和 `helloagents fullstack ...`
+2. **存储与配置层**：负责 root mode、runtime/config/index 路径和 `fullstack.yaml`
+3. **归属与影响分析层**：负责 owner service、影响范围、DAG 和 dispatch plan
+4. **任务组运行态层**：负责 `current.json`、任务状态、artifact、verification、closeout 和 summary
+5. **KB 与文档同步层**：负责项目知识库补齐、技术文档同步和 upstream 索引刷新
+6. **收尾把关层**：负责在显式全栈流程中阻止缺证据完成
+
+当前全栈模式最重要的架构变化是：
+
+- 主实现已经统一到 Node.js/ESM
+- 运行态不再依赖多份历史状态文件
+- `current.json` 成为当前需求的唯一任务组入口
+- 全局优先存储模型取代了项目内硬编码路径
+
+## 5. 第一层：统一入口层
+
+相关文件：
 
 - `scripts/fullstack-cli.mjs`
-- `scripts/fullstack-runtime-store.mjs`
-- `scripts/fullstack-config-store.mjs`
-- `scripts/fullstack-impact.mjs`
-- `scripts/fullstack-task-store.mjs`
-- `scripts/fullstack-kb-init.mjs`
-- `scripts/fullstack-sync.mjs`
-- `scripts/fullstack-migrate.mjs`
+- `scripts/notify-context.mjs`
+- `scripts/notify-route.mjs`
 
-这意味着全栈模式现在的核心事实是：
+### 5.1 `fullstack-cli.mjs` 的职责
 
-- CLI 入口、配置、运行态、任务状态、KB 初始化、文档同步都已经统一在 Node.js 中
-- 运行态不再分散在多个状态文件里，`current.json` 是唯一当前需求入口
-- 存储模型支持“全局优先，项目内兜底”
-- 派发计划、服务归属、影响分析、跨项目依赖分析都由 `fullstack-impact.mjs` 输出
+当前全栈模式的统一 CLI 入口是 `scripts/fullstack-cli.mjs`。
 
-## 3. 系统边界与设计原则
+它主要负责：
 
-### 3.1 系统边界
+- 解析 `helloagents fullstack ...` 子命令
+- 根据命令组分发给 runtime / config / impact / task / sync / kb / migrate 等模块
+- 为不同命令统一输出 JSON 或文本结果
 
-输入：
+它不负责深度业务推理，真正的领域逻辑分别下沉到各自的 store / impact / sync 模块。
 
-- 用户需求
-- `fullstack.yaml`
-- 项目代码、项目知识库、上游技术文档
+### 5.2 当前支持的命令分组
 
-输出：
-
-- 服务归属判断
-- 影响范围
-- DAG 派发计划
-- 任务组运行态
-- 技术文档同步结果
-
-存储：
-
-- 全局配置：`~/.helloagents/helloagents.json`
-- 全局 fullstack 根：`~/.helloagents/fullstack`
-- 全局配置文件：`FULLSTACK_CONFIG_ROOT/fullstack.yaml`
-- 全局索引：`FULLSTACK_INDEX_ROOT/*`
-- 运行态：`FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks/current.json`
-- legacy 兜底配置：`{KB_ROOT}/fullstack/fullstack.yaml`
-- legacy 兜底运行态：`{KB_ROOT}/fullstack/tasks/current.json`
-- 项目知识库：`{project}/.helloagents/*`
-
-### 3.2 设计原则
-
-- 配置优先：先信显式配置，再做轻量推断
-- 全局优先：支持把运行态和配置移出项目工作树，减少 Git 干扰
-- 单入口运行态：当前需求只保留一份 `current.json`
-- 契约先行：派发前生成 task contract，明确验证和交付要求
-- 拓扑驱动：层间串行、层内并行
-- 反馈闭环：反馈一次就更新状态、验证、收尾、artifact 与下游触发
-- 文档同频：跨项目依赖变化必须可同步、可追踪
-- 兼容落地：保留 legacy 项目内路径兜底与迁移能力
-
-## 4. 总体架构
-
-```mermaid
-flowchart TD
-    subgraph L1[01 用户入口层]
-        U[用户需求 / ~fullstack]
-    end
-
-    subgraph L2[02 编排控制层]
-        CLI[fullstack-cli.mjs<br/>统一命令入口，负责任务编排、命令分发与结果汇总]
-    end
-
-    subgraph L3[03 核心能力流程]
-        RT[fullstack-runtime-store.mjs<br/>解析全局/项目级运行态根目录，决定状态落盘位置]
-        CFG[fullstack-config-store.mjs<br/>维护 fullstack.yaml、工程师绑定与服务配置]
-        IMPACT[fullstack-impact.mjs<br/>负责服务归属分析、影响范围扩散、DAG 与派发计划生成]
-        KB[fullstack-kb-init.mjs<br/>补齐项目 .helloagents 知识库，合并 declared + detected 技术栈]
-        TASK[fullstack-task-store.mjs<br/>维护 current.json、任务状态、验证状态、收尾状态与摘要]
-        SYNC[fullstack-sync.mjs<br/>同步技术文档到 upstream 目录，并刷新索引]
-    end
-
-    subgraph L4[04 状态与产物层]
-        ROOT[global root / project root<br/>运行态根目录与配置根定位]
-        YAML[fullstack.yaml<br/>工程师、依赖、服务目录与编排策略配置]
-        DAG[DAG 层级 / ownership / dispatch plan<br/>需求先做归属判断，再扩散影响范围并生成可派发计划]
-        PROJECTKB[各项目 .helloagents<br/>项目知识、模块索引、规范与变更沉淀]
-        STATE[current.json<br/>当前需求唯一运行态入口，汇总 progress / verification / closeout / summary]
-        UPSTREAM[api/upstream 或 docs/upstream<br/>跨项目同步的上游技术文档目录]
-    end
-
-    subgraph L5[05 工程师执行层]
-        ENG1[后端工程师]
-        ENG2[前端工程师]
-        ENG3[移动端工程师]
-        EXEC[按角色拆分执行任务<br/>执行结果统一回流到任务状态中心]
-    end
-
-    U --> CLI
-    CLI --> RT --> ROOT
-    CLI --> CFG --> YAML
-    CLI --> IMPACT --> DAG
-    CLI --> KB --> PROJECTKB
-    CLI --> TASK --> STATE
-    CLI --> SYNC --> UPSTREAM
-
-    DAG -. 派发计划 .-> ENG1
-    DAG -. 派发计划 .-> ENG2
-    DAG -. 派发计划 .-> ENG3
-    ENG1 --> EXEC
-    ENG2 --> EXEC
-    ENG3 --> EXEC
-    EXEC --> TASK
-```
-
-## 5. 核心组件设计
-
-### 5.1 CLI 编排入口：`scripts/fullstack-cli.mjs`
-
-职责：
-
-- 解析 `helloagents fullstack ...`
-- 负责 runtime / init / migrate / impact / dispatch / task status / sync / kb 等子命令分发
-- 统一输出 JSON 或文本结果
-- 不承载复杂领域逻辑，领域计算下沉到 store / impact / sync 模块
-
-当前支持的命令分组：
+从现行实现看，统一入口已经覆盖：
 
 - `runtime`
 - `migrate`
@@ -193,166 +124,73 @@ flowchart TD
 - `sync`
 - `kb`
 
-### 5.2 运行态与路径解析：`scripts/fullstack-runtime-store.mjs`
+这说明今天的全栈模式已经不是一个“抽象概念”，而是一套可直接调用的编排 CLI。
 
-职责：
+### 5.3 `~fullstack` 在对话流里的角色
 
-- 管理全栈根目录模式：`project` / `global`
-- 计算 `project_runtime_key`
-- 解析 runtime/config/index 三类目录
-- 处理 `choose-root / set-root / get-root / clear-root`
-- 决定当前应该使用全局路径还是 legacy 项目内路径
+在对话执行链路中，`~fullstack` 是一个显式命令入口。
 
-关键行为：
+它的特点是：
 
-- `HELLOAGENTS_FULLSTACK_RUNTIME_ROOT` 环境变量优先于全局配置
-- `FULLSTACK_ROOT_MODE=global` 时默认把 runtime 放到 `~/.helloagents/fullstack`
-- 未配置全局 root 时，运行态回退到 `{KB_ROOT}/fullstack/tasks`
-- `resolveFullstackConfigFile` 遵循“显式环境变量 > 全局配置文件 > legacy 项目内配置”的思路
+- 不是语义选路默认会命中的普通路径
+- 一旦进入，就应受 fullstack 运行态和收尾 gate 约束
+- 只有真正完成任务组创建、派发、反馈、同步和收尾证据后，才允许报告完成
 
-### 5.3 配置存储：`scripts/fullstack-config-store.mjs`
+因此，全栈模式不是轻量提示功能，而是一个明确的高结构化执行路径。
 
-职责：
+## 6. 第二层：存储与配置层
 
-- 读写 `fullstack.yaml`
-- 生成默认配置模板
-- 校验配置结构
-- 维护工程师列表和项目绑定关系
-- 提供 `service_catalog`、`service_dependencies`、项目 owner 查询能力
+相关文件：
 
-默认配置聚焦这些结构：
+- `scripts/fullstack-runtime-store.mjs`
+- `scripts/fullstack-config-store.mjs`
 
-- `engineers[]`
-- `service_dependencies`
-- `service_catalog`
-- `orchestrator`
-- `tech_doc_templates`
+### 6.1 为什么存储层是全栈模式的核心
 
-### 5.4 服务归属与影响分析：`scripts/fullstack-impact.mjs`
+跨项目编排天然会带来两个问题：
 
-职责：
+- 运行态写到哪里，才能避免干扰各项目工作树
+- 配置与索引写到哪里，才能让多个项目复用同一套全栈上下文
 
-- 聚合所有已绑定项目
-- 结合 KB 内容推断项目能力摘要
-- 基于 `service_catalog` 分析 owner service
-- 计算上下游依赖和影响扩散
-- 生成 DAG 层级与派发计划
+因此，全栈模式当前首先解决的是“存哪”和“怎么找”的问题。
 
-核心能力：
+### 6.2 Root Mode：`project` 与 `global`
 
-- `analyzeServiceOwnership`
-- `analyzeImpact`
-- `analyzeCrossProjectDependencies`
-- `buildDispatchPlan`
+当前 runtime store 维护两种模式：
 
-设计要点：
+- `project`
+- `global`
 
-- `service_catalog` 是第一事实来源
-- KB 推断只作为低置信度补充，不替代显式声明
-- 未绑定项目不会阻断整体执行，只会出现在 `unassigned_projects` 与 warning 中
-- 派发计划只对 `dispatchable_projects` 继续推进
+语义分别是：
 
-### 5.5 任务运行态：`scripts/fullstack-task-store.mjs`
+- `project`：沿用项目内 `.helloagents/fullstack` 的 legacy 路径
+- `global`：将全栈运行态、配置和索引提升到 `~/.helloagents/fullstack` 体系
 
-职责：
+这让团队可以逐步从项目内模式迁移到全局模式，而不需要一次性完成切换。
 
-- 创建 task group
-- 维护任务状态推进
-- 维护验证状态与收尾状态
-- 维护必需 artifact 骨架与校验结果
-- 生成适合恢复与人工接管的 summary
+### 6.3 配置优先级与路径解析
 
-关键事实：
-
-- `current.json` 是唯一当前需求状态文件
-- fullstack runtime 不保留多条并行历史状态，只保留“当前这一条需求”
-- 状态写入时会同步刷新：
-  - `progress`
-  - `verification`
-  - `closeout`
-  - `artifact_status`
-  - `summary`
-
-### 5.6 项目知识库初始化：`scripts/fullstack-kb-init.mjs`
-
-职责：
-
-- 识别项目技术栈
-- 合并 declared + detected tech stack
-- 补齐项目 `.helloagents/` 核心文件
-- 兼容 legacy / 半成品 KB
-- 从 README / AGENTS / CLAUDE 等参考文档里抽取轻量事实
-
-补齐的核心知识文件包括：
-
-- `INDEX.md`
-- `context.md`
-- `guidelines.md`
-- `CHANGELOG.md`
-- `modules/_index.md`
-
-### 5.7 技术文档同步：`scripts/fullstack-sync.mjs`
-
-职责：
-
-- 将上游技术文档复制到依赖项目
-- 为同步文件写入来源与同步时间元信息
-- 刷新目标项目 upstream 索引
-
-同步目标目录：
-
-- API 类文档：`.helloagents/api/upstream`
-- 其他文档：`.helloagents/docs/upstream`
-
-## 6. 配置与目录模型
-
-### 6.1 全局配置
-
-全局配置文件：
-
-- `~/.helloagents/helloagents.json`
-
-其中和 fullstack 相关的关键键包括：
-
-- `FULLSTACK_ROOT_MODE`
-- `FULLSTACK_RUNTIME_ROOT`
-- `FULLSTACK_CONFIG_ROOT`
-- `FULLSTACK_INDEX_ROOT`
-
-### 6.2 fullstack 配置文件优先级
-
-当前代码逻辑下，配置文件解析优先级可概括为：
+当前全栈配置文件解析优先级可以概括为：
 
 1. `HELLOAGENTS_FULLSTACK_CONFIG_FILE`
-2. `FULLSTACK_CONFIG_ROOT/fullstack.yaml`
-3. `{KB_ROOT}/fullstack/fullstack.yaml`
+2. 若 root mode 为 `project`，直接使用 `{KB_ROOT}/fullstack/fullstack.yaml`
+3. 若存在全局 config 文件或已配置全局 runtime root，则使用 `FULLSTACK_CONFIG_ROOT/fullstack.yaml`
+4. 否则回退到 `{KB_ROOT}/fullstack/fullstack.yaml`
 
-其中：
+这意味着今天的全栈模式是**显式路径优先、全局优先、项目内兜底**。
 
-- 如果 root mode 被设置为 `project`，优先直接走 legacy 项目内配置
-- 如果全局 config 文件已存在，或全局 runtime root 已被配置，则优先走全局 config
+### 6.4 运行态路径模型
 
-### 6.3 运行态目录
+当前全栈运行态的关键路径是：
 
-全局模式：
+- 全局模式：`FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks/current.json`
+- 项目模式：`{KB_ROOT}/fullstack/tasks/current.json`
 
-`FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/fullstack/tasks/current.json`
+其中 `project_runtime_key` 是由项目绝对路径稳定哈希得到的 key，用来保证多项目运行态隔离。
 
-项目内模式：
+### 6.5 `fullstack.yaml` 的职责
 
-`{KB_ROOT}/fullstack/tasks/current.json`
-
-### 6.4 索引与迁移目录
-
-- 配置目录：`FULLSTACK_CONFIG_ROOT`
-- 索引目录：`FULLSTACK_INDEX_ROOT`
-- 默认全局根：`~/.helloagents/fullstack`
-
-## 7. 关键数据模型
-
-### 7.1 配置模型
-
-核心字段：
+当前配置文件的核心字段包括：
 
 - `version`
 - `mode`
@@ -362,68 +200,164 @@ flowchart TD
 - `orchestrator`
 - `tech_doc_templates`
 
-其中：
+其中最关键的三块是：
 
-- `engineers[]` 定义工程师身份、类型、项目列表
-- `service_dependencies` 定义项目间依赖
-- `service_catalog` 定义服务职责、能力、边界与入口
+- `engineers[]`：谁负责哪些项目
+- `service_catalog`：服务边界、能力与归属线索
+- `service_dependencies`：项目之间的依赖关系
 
-### 7.2 任务契约模型
+这三块共同构成全栈模式的事实基础。
 
-派发计划中的 assignment 会包含 `task_contract`，典型信息包括：
+### 6.6 YAML fallback 的意义
+
+当前 `fullstack-config-store.mjs` 自带 YAML fallback 解析与序列化能力。
+
+设计目的不是“造一套 YAML 轮子”，而是保证：
+
+- 不依赖复杂外部解析器也能稳定运行
+- fullstack 配置在受限环境中仍然可读写
+
+这属于全栈模式可靠性设计的一部分。
+
+## 7. 第三层：归属与影响分析层
+
+相关文件：
+
+- `scripts/fullstack-impact.mjs`
+- `scripts/fullstack-config-store.mjs`
+
+这是全栈模式区别于非全栈模式的第一条真正核心能力链。
+
+### 7.1 这层要回答什么问题
+
+当用户提交一个跨项目需求时，全栈模式必须先回答：
+
+- 哪个项目最适合作为 owner service
+- 哪些项目会被这次需求影响
+- 项目之间的先后依赖是什么
+- 哪些项目能真正派发
+- 哪些项目只是告警但暂时无法派发
+
+### 7.2 项目画像从哪里来
+
+当前实现会从两个来源构建项目画像：
+
+- `fullstack.yaml` 中显式声明的描述、绑定和服务关系
+- 各项目 `.helloagents/` 中的 KB 轻量推断
+
+KB 推断会扫描：
+
+- `context.md`
+- `modules/_index.md`
+- `api/upstream/_index.md`
+- `INDEX.md`
+
+然后抽取：
+
+- summary
+- capabilities
+- upstream_services
+- downstream_services
+
+但这里有一个非常重要的设计原则：
+
+> `service_catalog` 是第一事实来源，KB 推断只是低置信度补充，不能替代显式配置。
+
+### 7.3 影响分析链条
+
+当前分析主链可以概括为：
+
+- `service_catalog`
+- `ownership`
+- `impact`
+- `cross_project_dependencies`
+- `dispatch_plan`
+
+它们共同输出：
+
+- owner service
+- affected projects
+- dispatchable projects
+- unassigned projects
+- DAG 执行顺序
+- warnings
+
+### 7.4 未绑定项目为什么不阻断
+
+当前实现明确采用：
+
+- 未绑定项目进入 `unassigned_projects`
+- 生成 warning
+- 不阻断 `dispatchable_projects` 的继续执行
+
+这个设计非常关键，因为真实跨项目环境里，“不是所有项目都已经绑定工程师”是常态。
+
+如果把未绑定项目当成硬阻断，整个全栈模式会失去实用性。
+
+### 7.5 派发计划不是只有项目列表
+
+`buildDispatchPlan()` 生成的 assignment 不只是“项目名 + 工程师”。
+
+它还会附带 `task_contract`，其中通常包含：
 
 - `verify_mode`
 - `risk_level`
 - `reviewer_focus`
 - `tester_focus`
-- `required_artifacts`
+- `deliverables`
 - `upstream_projects`
 - `downstream_projects`
 - `upstream_contracts`
 
-设计目的：
+这意味着全栈模式的派发从一开始就是“带合同的派发”，而不是“把一句需求扔给另一个项目”。
 
-- 派发前就明确验证方式
-- 派发前就明确交付物
-- 主代理可以基于契约而不是口头约定做状态判断
+## 8. 第四层：任务组运行态层
 
-### 7.3 运行态模型
+相关文件：
 
-`current.json` 的主干结构包括：
+- `scripts/fullstack-task-store.mjs`
+- `scripts/fullstack-runtime-store.mjs`
+
+这是当前全栈模式的第二条核心能力链。
+
+### 8.1 `current.json` 是唯一当前需求入口
+
+当前任务组状态的中心文件是：
+
+- `current.json`
+
+它的设计意义是：
+
+- 全栈模式不维护多份并行历史状态
+- 当前需求只保留一个单入口状态文件
+- 所有进度、验证、收尾和摘要都围绕这一个入口聚合
+
+因此今天的全栈运行时更像一个“当前需求控制面板”，而不是历史任务仓库。
+
+### 8.2 任务组包含哪些核心结构
+
+当前 `current.json` 的主干结构包括：
 
 - `task_group_id`
 - `requirement`
 - `status`
+- `execution_layers`
+- `tasks`
 - `progress`
 - `verification`
 - `closeout`
-- `execution_layers`
-- `tasks`
 - `required_artifacts`
 - `artifact_scaffold`
 - `artifact_status`
 - `tech_docs_synced`
 - `summary`
+- `global_runtime`
 
-### 7.4 必需产物模型
+这说明全栈模式的状态模型不是只记录任务状态，而是把“任务、依赖、验证、交付物、摘要、运行态路径”全部集中到了一个对象里。
 
-当前默认要求的三件套为：
+### 8.3 任务级与任务组级状态并存
 
-- `fullstack/docs/tasks.md`
-- `fullstack/docs/agents.md`
-- `fullstack/docs/upstream.md`
-
-如果这些产物缺失：
-
-- 创建 task group 时会先 scaffold
-- 运行态会在 `artifact_status` 中标出 `missing / scaffolded / verified`
-- 在完成态下若仍缺失，会把 `summary.next_step` 指向“先补齐 fullstack 必需产物，再进入统一收尾”
-
-## 8. 状态机设计
-
-### 8.1 任务状态
-
-任务级状态：
+每个任务都有自己的状态：
 
 - `pending`
 - `in_progress`
@@ -433,244 +367,280 @@ flowchart TD
 - `blocked`
 - `skipped`
 
-状态推进规则：
-
-- `startTask`：`pending -> in_progress`
-- `completeTask(..., 'completed')`：`in_progress -> completed`
-- `completeTask(..., 'partial')`：`in_progress -> partial`
-- `failTask`：`in_progress -> failed`
-- 上游失败：下游 `pending / in_progress -> blocked`
-- `retryTask`：`failed -> pending`，最多 3 次
-
-### 8.2 任务组状态
-
-任务组整体状态来自 `updateProgress()` 聚合：
-
-- 全部完成：`completed`
-- 存在进行中：`in_progress`
-- 全部结束但有失败：
-  - 有已完成任务：`partial`
-  - 无已完成任务：`failed`
-- 仅剩阻塞：`blocked`
-- 初始：`pending`
-
-### 8.3 验证与收尾状态
-
-每个任务独立维护：
+每个任务还会独立维护：
 
 - `verification_status`
-  - `pending`
-  - `passed`
-  - `needs_attention`
 - `closeout_status`
-  - `pending`
-  - `ready`
-  - `needs_attention`
 
-这让系统能区分：
+而任务组级别又会单独聚合：
 
-- 代码做完但验证未过
-- 验证通过但交付物没补齐
-- 任务完成且可进入统一收尾
+- `progress`
+- `verification`
+- `closeout`
 
-## 9. DAG 调度模型
+所以当前运行态能清楚区分：
 
-### 9.1 层级生成
+- 哪个任务做完了
+- 哪个任务验证还没过
+- 哪个任务交付物还不完整
+- 任务组整体是否真的能收尾
 
-`computeExecutionLayers()` 会基于 `depends_on` 生成拓扑层级：
+### 8.4 `local_runtime` 与 `global_runtime`
 
-- 同层任务可并发
-- 下一层必须等待依赖层完成
-- 如果出现环，会把剩余节点收敛到一层，并标记 `note: circular_dependency_detected`
+全栈模式不仅有全局任务组状态，还会为每个任务生成项目本地运行态投影：
 
-### 9.2 下游触发
+- inbox
+- state
+- events
+- errors
+- handoff
 
-只有在 `processFeedback(taskId, 'completed', result)` 成功后，才会尝试触发 ready 的下游任务。
+同时，任务组本身维护：
 
-规则：
+- `global_runtime.state_file`
+- `global_runtime.event_log`
+- `global_runtime.error_log`
 
-- 只有依赖全部 `completed / skipped` 的任务才算 ready
-- `partial` 不会自动触发下游
-- `failed` 会触发 downstream blocked
+这套双层结构的含义是：
 
-### 9.3 派发计划
+- **全局 runtime** 负责统一汇总
+- **项目本地 runtime** 负责让被派发项目可感知、可接手
 
-`buildDispatchPlan()` 的关键输出包括：
+### 8.5 summary 为什么重要
 
-- `assignments`
-- `dispatchable_projects`
-- `unassigned_projects`
-- `grouped_by_engineer_type`
-- `dispatch_execution_order`
-- `warnings`
+当前设计中，`summary` 是给恢复和人工接管准备的。
 
-设计含义：
+它通常会概括：
 
-- 允许有未绑定项目
-- 只要仍有可派发项目，就继续执行
-- 未绑定项目只作为 advisory warning，不是阻断错误
+- 当前 requirement
+- overall_status
+- current_layer
+- completed_projects
+- pending_projects
+- blocked_tasks
+- missing_artifacts
+- next_step
 
-## 10. 端到端执行流程
+它不是历史档案，而是“当前需求快照”。
 
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant CLI as fullstack-cli.mjs
-    participant Runtime as fullstack-runtime-store.mjs
-    participant Config as fullstack-config-store.mjs
-    participant Impact as fullstack-impact.mjs
-    participant KB as fullstack-kb-init.mjs
-    participant Task as fullstack-task-store.mjs
-    participant Eng as 工程师子代理
-    participant Sync as fullstack-sync.mjs
+### 8.6 事件日志为什么重要
 
-    User->>CLI: 提交需求 / 触发 ~fullstack
-    CLI->>Runtime: 解析 root / config / state 路径
-    CLI->>Config: 读取 fullstack.yaml
-    CLI->>Impact: ownership + impact + dispatch-plan
-    Impact-->>CLI: owner_service / affected projects / DAG
-    CLI->>KB: 按项目补齐 .helloagents
-    CLI->>Task: create task group
-    loop 按 DAG 层级
-        CLI->>Eng: 派发同层项目任务
-        Eng-->>CLI: 结果反馈
-        CLI->>Task: feedback(task_id, status, result)
-        Task-->>CLI: progress + triggered_tasks + summary
-    end
-    CLI->>Sync: 同步 tech docs / 刷新 upstream index
-    Sync-->>CLI: synced result
-    CLI-->>User: 汇总报告 + 下一步
-```
+`fullstack-task-store.mjs` 会把关键动作写入：
 
-## 11. 运行态恢复与人工接管
+- `events.ndjson`
+- `errors.ndjson`
 
-当前实现不依赖多份历史 runtime，而是依赖 `summary` 字段提供“当前需求快照”。
+同时 `fullstack-gate.mjs` 也会用这些事件来判断：
 
-`summary` 重点包含：
+- 是否存在任务完成/失败/阻塞的真实运行态证据
 
-- `requirement`
-- `overall_status`
-- `current_layer`
-- `completed_projects`
-- `pending_projects`
-- `blocked_tasks`
-- `missing_artifacts`
-- `next_step`
+因此，事件日志不仅用于追踪，也直接影响“是否允许完成”的判断。
 
-它的价值是：
+## 9. 第五层：artifact、verification、closeout 三条收尾子链
 
-- 主代理可快速恢复当前需求状态
-- 人工接管时能直接看到剩余工作和阻塞点
-- 即使任务组整体完成，也能继续检查是否还缺必需产物
+相关文件：
 
-## 12. 项目知识库策略
+- `scripts/fullstack-task-store.mjs`
+- `scripts/fullstack-gate.mjs`
 
-全栈模式不会深度扫描整个项目，而是优先采用“用户声明 + 轻量事实补充”的方式初始化 KB。
+### 9.1 为什么全栈模式默认要求三份必需文档
 
-初始化阶段会综合这些信息源：
+当前全栈模式默认要求的 artifact 三件套是：
 
-- 绑定时显式传入的描述与 tech stack
-- `package.json` / `pom.xml` / `go.mod` / `requirements.txt` 等结构化文件
+- `fullstack/docs/tasks.md`
+- `fullstack/docs/agents.md`
+- `fullstack/docs/upstream.md`
+
+原因不是为了多写文档，而是为了保证跨项目任务至少有三个最基本的外显面：
+
+- 任务怎么拆
+- 工程师怎么分工
+- 上游依赖和同步状态怎么追踪
+
+### 9.2 artifact 状态不是简单存在性检查
+
+当前实现会把 artifact 状态标成：
+
+- `missing`
+- `scaffolded`
+- `verified`
+
+这意味着它不只检查“文件有没有”，还区分：
+
+- 只是脚手架创建了
+- 还是已经和任务结果建立了真实对应关系
+
+### 9.3 verification 与 closeout 是两条不同的线
+
+当前设计里：
+
+- `verification` 关注“任务做完后是否已验证”
+- `closeout` 关注“即使验证通过，交付物是否也准备好了”
+
+这让系统能清楚区分三种状态：
+
+- 代码做完了，但验证没通过
+- 验证过了，但收尾资料没补齐
+- 验证和收尾都满足，可以进入最终完成
+
+### 9.4 fullstack gate 的职责
+
+`fullstack-gate.mjs` 的作用是：
+
+- 检查当前是否为显式 `~fullstack` 路径
+- 检查 turn state 是否在尝试写 `complete`
+- 如果当前缺少全栈任务组状态、缺少文档、缺少任务、缺少本地运行态或缺少事件证据，就阻止完成
+
+这意味着显式全栈流程不能靠“自然语言说完成了”收尾，必须有真实运行态证据支撑。
+
+## 10. 第六层：KB 自动补齐与文档同步层
+
+相关文件：
+
+- `scripts/fullstack-kb-init.mjs`
+- `scripts/fullstack-sync.mjs`
+
+### 10.1 KB 初始化不是深度百科生成
+
+当前 KB 初始化的目标不是深扫整个项目、生成巨量知识文件，而是快速补齐跨项目编排所需的最低事实。
+
+它会综合：
+
+- 绑定时显式传入的项目描述与技术栈
+- `package.json` / `pom.xml` / `go.mod` / `requirements.txt` 等结构化配置
 - `README.md` / `AGENTS.md` / `CLAUDE.md` / `docs/README.md`
 
-目标不是产出完美百科，而是快速补齐能支撑全栈派发的最低事实：
+补齐的核心文件包括：
 
-- 这个项目是什么
-- 它使用什么技术栈
-- 谁负责它
-- 它和谁上下游相连
+- `INDEX.md`
+- `context.md`
+- `guidelines.md`
+- `CHANGELOG.md`
+- `modules/_index.md`
 
-## 13. 技术文档同步策略
+所以它更像“可派发前的知识基线修复”，而不是“项目百科系统”。
 
-技术文档同步由 `fullstack-sync.mjs` 负责，当前实现关注两件事：
+### 10.2 KB 初始化要解决什么现实问题
 
-1. 把文件拷贝到目标项目 upstream 目录
-2. 给同步结果补上可追踪元信息
+全栈派发前至少要知道：
 
-元信息包含：
+- 这个项目是干什么的
+- 用什么技术栈
+- 可能负责什么能力
+- 是否已经有最基础的 `.helloagents/` 结构
 
-- `同步自`
-- `同步时间`
-- `文档类型`
+没有这些最低事实，impact 分析和任务派发都会变得不稳定。
 
-同步完成后，还会刷新目标项目的 `_index.md`，方便人工追踪来源和时效。
+### 10.3 技术文档同步层做什么
 
-## 14. 迁移与兼容性
+`fullstack-sync.mjs` 主要做两件事：
 
-当前代码同时支持：
+- 把技术文档复制到目标项目的 upstream 目录
+- 为同步文件加上来源、时间、文档类型等元信息
 
-- 新的全局根目录模式
-- 旧的项目内 legacy 模式
-- legacy -> global 的迁移与回滚
+同步目录遵循：
 
-对应能力由 `scripts/fullstack-migrate.mjs` 提供：
+- API 类文档 → `.helloagents/api/upstream`
+- 其他文档 → `.helloagents/docs/upstream`
 
-- `dry-run`
-- `to-global`
-- `rollback`
+### 10.4 upstream 索引为什么重要
 
-这让团队可以逐步把：
+同步完成后，系统会刷新 `_index.md`。
 
-- `fullstack.yaml`
-- `current.json`
-- index 数据
+它的作用不是装饰，而是让下游项目能快速看到：
 
-从项目工作树迁移到用户级全局目录，而不需要一次性切换所有项目。
+- 现有哪些上游文档
+- 文档来自哪个项目
+- 最后一次同步是什么时候
 
-## 15. 安全性与可靠性
+这让“跨项目同步”从单次复制动作变成可追踪的知识链。
 
-当前设计里的可靠性保障主要来自这些点：
+## 11. 当前全栈模式的端到端主流程
 
-- 所有配置和状态统一用 UTF-8 读写
-- YAML 解析具备 fallback，不强依赖复杂解析器
-- 运行态与配置路径有显式优先级，不靠隐式猜测
-- 循环依赖不会让分析阶段直接崩溃，而是显式标记出来
-- 缺失 artifact、验证未通过、收尾未就绪都能在 runtime 中直接体现
+如果从一次真实需求开始，当前全栈模式更接近下面这条链路：
 
-## 16. 与普通模式的关系
+1. 用户显式进入 `~fullstack` 或调用 `helloagents fullstack ...`
+2. 统一入口层解析 root、config、state 位置
+3. 配置层读取 `fullstack.yaml` 与工程师绑定关系
+4. impact 层完成 owner service 判断、影响扩散、依赖分析和 dispatch plan 生成
+5. KB 初始化层按项目补齐最低 `.helloagents/` 基线
+6. task store 创建任务组，写入 `current.json`
+7. 按 DAG 层级派发同层项目任务
+8. 各项目执行结果回流 task store，持续刷新 progress / verification / closeout / artifact_status / summary
+9. sync 层同步技术文档并更新 upstream 索引
+10. gate 层检查全栈运行态证据是否完备，满足条件后才允许真正完成
 
-全栈模式是 HelloAGENTS 的一层编排扩展，不是替代品。
+因此，全栈模式真正管理的是一个“跨项目任务组生命周期”，而不是一串分散命令。
 
-它和普通模式的边界是：
+## 12. 与旧设计理解相比，最大的变化是什么
 
-- 普通模式擅长单项目内的方案、实现、验证
-- 全栈模式擅长跨项目的服务归属、派发、汇总与同步
+如果和早期全栈模式理解相比，当前实现最重要的变化有这些：
 
-因此推荐心智模型是：
+### 12.1 从 Python 中心实现转向 Node.js/ESM 主实现
 
-- 项目内怎么做，仍由各项目自己的 `~auto / ~plan / ~exec` 负责
-- 哪些项目该参与、先做谁、谁依赖谁、文档怎么同步，由 fullstack 负责
+今天的全栈核心已经明确落在：
 
-## 17. 评审清单
+- `fullstack-cli.mjs`
+- `fullstack-runtime-store.mjs`
+- `fullstack-config-store.mjs`
+- `fullstack-impact.mjs`
+- `fullstack-task-store.mjs`
+- `fullstack-kb-init.mjs`
+- `fullstack-sync.mjs`
 
-建议按以下顺序评审这套设计是否与代码一致：
+### 12.2 从分散状态文件转向单入口 `current.json`
 
-1. 是否明确写清了 Node.js/ESM 已经是当前唯一 fullstack 主实现。
-2. 是否明确写清了 `current.json` 是唯一当前需求运行态入口。
-3. 是否明确写清了全局优先、项目内兜底的配置与 runtime 路径。
-4. 是否明确写清了 `service_catalog -> ownership -> impact -> dispatch-plan` 这条分析链。
-5. 是否明确写清了三份必需文档：`tasks.md`、`agents.md`、`upstream.md`。
-6. 是否明确写清了 artifact / verification / closeout 三类汇总状态。
-7. 是否明确写清了未绑定项目只告警、不阻断可派发项目执行。
-8. 是否明确写清了 KB 初始化是轻量事实补全，不是深度扫描。
-9. 是否明确写清了技术文档同步与 upstream index 刷新逻辑。
-10. 是否明确写清了 migrate / rollback 与 legacy 兼容边界。
+现在的运行时主入口是一个任务组状态文件，而不是多份散落状态对象。
 
-## 18. 术语表
+### 12.3 从“项目列表派发”转向“带 task contract 的派发”
 
-| 术语 | 说明 |
-|------|------|
-| Fullstack Root Mode | fullstack 存储模式，取值为 `project` 或 `global` |
-| Runtime Root | 全栈运行态根目录 |
-| Config Root | 全栈配置目录 |
-| Index Root | 全栈索引目录 |
-| project_runtime_key | 由项目绝对路径稳定计算出的运行态目录 key |
-| owner service | 被判定为最应承载当前需求的项目/服务 |
-| dispatchable project | 已绑定工程师、可真正参与派发的项目 |
-| unassigned project | 未绑定工程师、仅告警不派发的项目 |
-| task contract | 派发时附带的验证/交付约束 |
-| artifact_status | 必需文档与交付物的存在性和验证状态汇总 |
-| verification | 任务组级验证状态汇总 |
-| closeout | 任务组级收尾状态汇总 |
-| summary | 当前需求的恢复与接管摘要 |
-| upstream sync | 技术文档向依赖项目同步的过程 |
+现在派发时不仅决定“发给谁”，还会同时明确：
+
+- 风险等级
+- 验证模式
+- reviewer / tester 关注点
+- 必需交付物
+- 上下游依赖约束
+
+### 12.4 从“做完即可”转向“gate 把关后才允许完成”
+
+当前显式全栈流程必须具备：
+
+- 任务组状态
+- 必需 artifact
+- 项目本地 runtime
+- 事件日志证据
+
+否则不能宣称完成。
+
+## 13. 推荐阅读顺序
+
+如果你想从代码理解全栈模式，建议顺序如下：
+
+1. 先读 `scripts/fullstack-cli.mjs`
+   目标：理解统一命令入口和分组命令边界
+
+2. 再读 `scripts/fullstack-runtime-store.mjs`
+   目标：理解 root mode、config/runtime/index 路径解析和全局优先策略
+
+3. 再读 `scripts/fullstack-config-store.mjs`
+   目标：理解 `fullstack.yaml` 数据模型和工程师/服务配置
+
+4. 再读 `scripts/fullstack-impact.mjs`
+   目标：理解 ownership、impact、cross-deps、dispatch-plan 生成链
+
+5. 再读 `scripts/fullstack-task-store.mjs`
+   目标：理解任务组状态、artifact、verification、closeout、summary 和日志
+
+6. 最后读 `scripts/fullstack-kb-init.mjs`、`scripts/fullstack-sync.mjs`、`scripts/fullstack-gate.mjs`
+   目标：理解 KB 初始化、跨项目文档同步和完成态把关
+
+## 14. 最后一段总结
+
+今天的 HelloAGENTS 全栈模式，可以理解为：
+
+它先通过统一 CLI 和全局优先存储模型，把跨项目需求组织成一个可追踪的任务组，再通过 impact 层判断 owner service、影响范围与派发顺序，通过 task store 把任务、依赖、验证、交付物和摘要收敛到单个 `current.json`，最后借助 KB 初始化、技术文档同步和 fullstack gate，把多项目协作从“靠人工协调”提升为“有编排、有证据、有收尾边界”的运行时。
+
+如果只保留一句话：
+
+> 全栈模式不是“多项目版 ~auto”，而是 HelloAGENTS 当前的跨项目编排运行时。
