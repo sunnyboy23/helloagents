@@ -8,8 +8,12 @@ export function parseStdoutJson(result) {
   return result.stdout ? JSON.parse(result.stdout) : null
 }
 
-export function getSessionStatePath(project, { branch = 'detached', session = 'default' } = {}) {
-  return join(project, '.helloagents', 'sessions', branch, session, 'STATE.md')
+export function getSessionStatePath(project, { workspace = 'workspace', session = 'default' } = {}) {
+  return join(project, '.helloagents', 'sessions', workspace, session, 'STATE.md')
+}
+
+export function getSessionEvidencePath(project, fileName, { workspace = 'workspace', session = 'default' } = {}) {
+  return join(project, '.helloagents', 'sessions', workspace, session, 'artifacts', fileName)
 }
 
 export function writeSettings(home, overrides = {}) {
@@ -21,6 +25,7 @@ export function writeSettings(home, overrides = {}) {
     guard_enabled: true,
     kb_create_mode: 1,
     project_store_mode: 'local',
+    auto_commit_enabled: true,
     commit_attribution: '',
     install_mode: 'standby',
     ...overrides,

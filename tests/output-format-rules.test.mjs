@@ -12,15 +12,34 @@ function read(relativePath) {
 test('bootstrap rules restrict HelloAGENTS wrapper to final non-streaming close-out replies only', () => {
   for (const file of ['bootstrap.md', 'bootstrap-lite.md']) {
     const content = read(file);
-    assert.match(content, /语言与表述（强制）/);
-    assert.match(content, /简洁、自然、准确、合理、不赘述、不冗余、不过度精简/);
+    assert.match(content, /## 通用交付规则（强制）/);
+    assert.match(content, /### 产出质量/);
+    assert.ok(content.indexOf('### 执行纪律') < content.indexOf('### 表达与语气'));
+    assert.match(content, /### 表达与语气/);
+    assert.match(content, /都必须同时遵守本节全部规则/);
+    assert.match(content, /普通问答、解释、分析、改写、邮件回复和其他一次性交付/);
+    assert.match(content, /默认只交付与当前请求直接对应的一版最终结果/);
+    assert.match(content, /请求已满足时直接结束，不主动追加无执行价值的延伸、派生版本、不同写法、第二版或邀约式收尾/);
+    assert.match(content, /回复末尾只保留结论、风险、限制、已完成状态、阻塞项或真实下一步动作/);
+    assert.match(content, /说话像成熟同事，不像客服、销售或咨询顾问/);
+    assert.match(content, /直接回答，少铺垫；需要先给结论时先给结论，再补必要细节。能用一版说清就只给一版，不主动提供多个备选、补充改写或派生版本/);
+    assert.match(content, /用词用语和表述方式保持简洁、自然、清晰、准确、合理、统一，不赘述、不冗余、不过度精简/);
+    assert.match(content, /优先使用普通、易懂、贴近用户的表达；必要术语先解释，再补原名/);
     assert.match(content, /准确优先于压缩/);
-    assert.match(content, /不写无执行价值的客套、邀约、重复确认、能力陈述或空泛建议/);
+    assert.match(content, /不输出黑话、营销话、内部化表述或空泛形容；不为了显得专业而堆黑话/);
+    assert.match(content, /不输出客套内容、重复确认或无执行价值的自我能力陈述/);
+    assert.match(content, /遵循 DIY 原则/);
+    assert.match(content, /优先在原条目内收敛表达/);
+    assert.match(content, /复用已有概念和表述/);
+    assert.match(content, /同步删除重复表述/);
     assert.match(content, /适用条件：/);
     assert.match(content, /排除条件：/);
     assert.match(content, /输出格式：/);
     assert.match(content, /使用约束：/);
-    assert.match(content, /主代理仅可在本轮最后一条/);
+    assert.match(content, /输出格式只在缺少 `output_format` 已知值时触发读取/);
+    assert.match(content, /会话级缓存优先/);
+    assert.match(content, /同一路径的配置文件、模块、SKILL、模板只读一次/);
+    assert.match(content, /主代理必须在本轮最后一条/);
     assert.match(content, /使用输出格式/);
     assert.match(content, /(某个|任何) skill 在本轮(?:如)?明确要求输出停顿、确认或总结/);
     assert.match(content, /不再继续调用工具.*不再继续执行/);
@@ -28,10 +47,18 @@ test('bootstrap rules restrict HelloAGENTS wrapper to final non-streaming close-
     assert.match(content, /以下内容一律视为中间输出/);
     assert.match(content, /不得使用输出格式/);
     assert.match(content, /子代理在任何场景下都不得使用输出格式/);
+    assert.match(content, /首行必须保留 `【HelloAGENTS】` 和连字符 `-`，不得省略/);
     assert.match(content, /状态图标与收尾内容必须一致/);
-    assert.match(content, /仅在本轮执行已完成且不再等待用户输入时，才能使用 `✅完成`/);
+    assert.match(content, /仅在本轮执行已完成且不存在待确认动作时，才能使用 `✅完成`/);
+    assert.match(content, /同一条最终收尾消息只使用一次该格式/);
+    assert.match(content, /不得在正文中再次输出 `【HelloAGENTS】` 或第二个 `🔄 下一步`/);
+    assert.match(content, /含确认是否执行已给出的方案/);
+    assert.match(content, /若正在等待确认，写清待确认动作/);
     assert.match(content, /不用“下一步建议”代替实际执行/);
-    assert.match(content, /只写真实下一步，不改写成条件式能力表述或询问句/);
+    assert.match(content, /必须写真正的下一步动作/);
+    assert.match(content, /不写单纯当前状态或条件式能力表述/);
+    assert.match(content, /含确认是否执行已给出的方案或修改/);
+    assert.match(content, /若仍有已授权且可继续执行的动作，不得收尾，必须继续执行/);
   }
 });
 
@@ -39,18 +66,36 @@ test('skill and help docs describe output_format as final-summary only', () => {
   const helloagentsSkill = read('skills/helloagents/SKILL.md');
   assert.match(helloagentsSkill, /不得包装 HelloAGENTS 外层输出格式/);
   assert.match(helloagentsSkill, /本轮最终收尾消息/);
-  assert.match(helloagentsSkill, /所有流式内容、进度或状态汇报、中间文本/);
+  assert.match(helloagentsSkill, /通用输出格式/);
+  assert.match(helloagentsSkill, /流式内容、进度或状态汇报、中间文本/);
+  assert.match(helloagentsSkill, /最终收尾中的 `🔄 下一步` 写真实动作/);
+  assert.match(helloagentsSkill, /已获授权且可继续执行时不得收尾/);
+  assert.match(helloagentsSkill, /同一条最终收尾消息只包装一次/);
+  assert.match(helloagentsSkill, /不在正文里再次输出 `【HelloAGENTS】` 或第二个 `🔄 下一步`/);
 
   const helloWriteSkill = read('skills/hello-write/SKILL.md');
-  assert.match(helloWriteSkill, /简洁、自然、准确、合理、不赘述、不冗余、不过度精简/);
-  assert.match(helloWriteSkill, /准确优先于压缩/);
+  assert.match(helloWriteSkill, /通用交付规则中的执行纪律与表达与语气要求/);
+  assert.match(helloWriteSkill, /邮件回复、问答说明、措辞改写/);
+  assert.match(helloWriteSkill, /默认交付一个可直接使用的最终文本/);
+  assert.match(helloWriteSkill, /先直接给可用文本或结论，再补必要说明/);
+  assert.match(helloWriteSkill, /未明确要求多版本时，只给一个最终版本/);
+  assert.match(helloWriteSkill, /文本已满足请求时直接结束，不加无执行价值的邀约式收尾/);
+  assert.doesNotMatch(helloWriteSkill, /简洁、自然、准确、合理、不赘述、不冗余、不过度精简/);
   assert.match(helloWriteSkill, /不重复同一结论/);
 
   const subagentSkill = read('skills/hello-subagent/SKILL.md');
   assert.match(subagentSkill, /团队协作中的进度与状态汇报都属于中间输出/);
   assert.match(subagentSkill, /本轮最终收尾时才可使用 HelloAGENTS 外层输出格式/);
 
+  const readmeEn = read('README.md');
+  assert.match(readmeEn, /main-agent final closeout must use the HelloAGENTS layout/);
+
+  const readmeCn = read('README_CN.md');
+  assert.match(readmeCn, /主代理最终收尾必须使用 HelloAGENTS 格式/);
+
   const helpSkill = read('skills/commands/help/SKILL.md');
-  assert.match(helpSkill, /仅主代理在最终收尾回复使用 HelloAGENTS 格式/);
-  assert.match(helpSkill, /所有流式\/中间输出及子代理输出保持自然/);
+  assert.match(helpSkill, /缺少下表任一配置项/);
+  assert.match(helpSkill, /后续轮次复用/);
+  assert.match(helpSkill, /主代理最终收尾必须使用 HelloAGENTS 格式/);
+  assert.match(helpSkill, /流式\/中间输出及子代理输出保持自然/);
 });

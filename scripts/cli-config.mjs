@@ -9,8 +9,10 @@ export const DEFAULTS = {
 
   kb_create_mode: 1,
   project_store_mode: 'local',
+  auto_commit_enabled: true,
   commit_attribution: '',
   install_mode: 'standby',
+  host_install_modes: {},
 };
 
 export function loadPackageVersion(pkgRoot) {

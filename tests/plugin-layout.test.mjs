@@ -17,6 +17,16 @@ test('plugin manifests and host hook files match their target CLIs', () => {
   assert.equal(claudePlugin.skills, './skills');
   assert.equal(claudePlugin.hooks, './hooks/hooks-claude.json');
 
+  const claudeMarketplace = JSON.parse(read('.claude-plugin/marketplace.json'));
+  assert.equal(claudeMarketplace.name, 'helloagents');
+  assert.doesNotMatch(claudeMarketplace.description, /Development/);
+  assert.equal(claudeMarketplace.plugins[0].name, 'helloagents');
+  assert.deepEqual(claudeMarketplace.plugins[0].source, {
+    source: 'github',
+    repo: 'hellowind777/helloagents',
+  });
+  assert.equal(claudeMarketplace.plugins[0].version, undefined);
+
   const codexPlugin = JSON.parse(read('.codex-plugin/plugin.json'));
   assert.equal(codexPlugin.skills, './skills');
   assert.equal(codexPlugin.hooks, undefined);
@@ -38,6 +48,14 @@ test('plugin manifests and host hook files match their target CLIs', () => {
   assert.match(claudeHooks, /\$\{CLAUDE_PLUGIN_ROOT\}/);
   assert.match(claudeHooks, /--claude/);
   assert.doesNotMatch(claudeHooks, /BeforeAgent/);
+
+  const codexHooks = read('hooks/hooks-codex.json');
+  assert.match(codexHooks, /SessionStart/);
+  assert.match(codexHooks, /UserPromptSubmit/);
+  assert.match(codexHooks, /Stop/);
+  assert.match(codexHooks, /--codex --silent/);
+  assert.match(codexHooks, /\$\{PLUGIN_ROOT\}/);
+  assert.doesNotMatch(codexHooks, /statusMessage/);
 });
 
 test('bootstrap path rules no longer depend on host-name placeholders or wrong carrier-relative skills paths', () => {
@@ -46,16 +64,17 @@ test('bootstrap path rules no longer depend on host-name placeholders or wrong c
     assert.doesNotMatch(content, /当前CLI名称/);
     assert.doesNotMatch(content, /本文件所在目录\/skills\/commands/);
     assert.doesNotMatch(content, /本文件所在目录\/skills\/\{技能名\}/);
-    assert.match(content, /## \.helloagents\/ 目录/);
-    assert.match(content, /## 项目上下文/);
+    assert.match(content, /### \.helloagents\/ 目录/);
+    assert.match(content, /## 项目存储与上下文/);
     assert.match(content, /路径定义：`\{HELLOAGENTS_READ_ROOT\}`/);
     assert.match(content, /不要读取项目路径|不要.*项目目录.*HelloAGENTS skills 路径/);
-    assert.match(content, /同一轮内对同一配置文件、模块、SKILL、模板只读取一次/);
+    assert.match(content, /同一路径的配置文件、模块、SKILL、模板只读一次/);
+    assert.match(content, /输出格式只在缺少 `output_format` 已知值时触发读取/);
   }
 
   const helloagentsSkill = read('skills/helloagents/SKILL.md');
   assert.doesNotMatch(helloagentsSkill, /当前CLI名称/);
   assert.match(helloagentsSkill, /路径定义：`\{HELLOAGENTS_READ_ROOT\}`/);
   assert.match(helloagentsSkill, /不要.*项目目录.*HelloAGENTS skills 路径/);
-  assert.match(helloagentsSkill, /同一轮内对同一配置文件、模块、SKILL、模板只读取一次/);
+  assert.match(helloagentsSkill, /同一路径的配置文件、模块、SKILL、模板只读一次/);
 });

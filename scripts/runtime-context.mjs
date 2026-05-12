@@ -1,42 +1,86 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, normalize, resolve } from 'node:path'
-import { homedir } from 'node:os'
+import { normalize, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 
-const RUNTIME_DIR = join(homedir(), '.helloagents', 'runtime')
-const ROUTE_CONTEXT_PATH = join(RUNTIME_DIR, 'route-context.json')
-const TURN_TIMING_PATH = join(RUNTIME_DIR, 'turn-timing.json')
-const ROUTE_CONTEXT_TTL_MS = 30 * 60 * 1000
+import {
+  clearCapsuleSection,
+  getRuntimeScope,
+  readCapsuleSection,
+  writeCapsuleSection,
+} from './session-capsule.mjs'
+import { ROUTE_CONTEXT_TTL_MS } from './runtime-ttl.mjs'
+
+export const UNBOUND_ROUTE_CONTEXT_TTL_MS = 10 * 60 * 1000
 
 function normalizePath(filePath = '') {
   return filePath ? normalize(resolve(filePath)) : ''
 }
 
-function ensureRuntimeDir() {
-  mkdirSync(dirname(ROUTE_CONTEXT_PATH), { recursive: true })
+function normalizeIdentityValue(value) {
+  return String(value || '').trim()
 }
 
-function readJsonFile(filePath) {
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf-8'))
-  } catch {
-    return {}
+function extractPayloadIdentity(payload = {}) {
+  return {
+    sessionId: normalizeIdentityValue(payload.sessionId || payload.session_id || payload['session-id']),
+    threadId: normalizeIdentityValue(payload.threadId || payload.thread_id || payload['thread-id']),
+    turnId: normalizeIdentityValue(payload.turnId || payload.turn_id || payload['turn-id']),
+    goalId: normalizeIdentityValue(payload.goalId || payload.goal_id || payload['goal-id']),
   }
 }
 
-function writeJsonFile(filePath, value) {
-  ensureRuntimeDir()
-  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8')
+function hashPrompt(prompt = '') {
+  const text = String(prompt || '').trim()
+  if (!text) return ''
+  return createHash('sha1').update(text).digest('hex').slice(0, 16)
 }
 
-export function clearRouteContext() {
-  rmSync(ROUTE_CONTEXT_PATH, { force: true })
+function routeSource(payload = {}) {
+  return normalizeIdentityValue(payload.hookEventName || payload.source || payload.type || '')
 }
 
-export function writeTurnTiming({ cwd, prompt = '', source = 'route', now = Date.now() } = {}) {
+function hasTurnBinding(identity = {}) {
+  return Boolean(identity.turnId)
+}
+
+function hasAnyIdentity(identity = {}) {
+  return Boolean(identity.sessionId || identity.threadId || identity.turnId || identity.goalId)
+}
+
+function routeContextMaxAge(context = {}) {
+  return hasTurnBinding(context.identity) ? ROUTE_CONTEXT_TTL_MS : UNBOUND_ROUTE_CONTEXT_TTL_MS
+}
+
+function identityFieldsMatch(contextIdentity = {}, payloadIdentity = {}) {
+  for (const key of ['sessionId', 'threadId', 'turnId', 'goalId']) {
+    if (contextIdentity[key] && !payloadIdentity[key]) return false
+    if (contextIdentity[key] && payloadIdentity[key] && contextIdentity[key] !== payloadIdentity[key]) return false
+  }
+  return true
+}
+
+function payloadMatchesRouteContext(context = {}, payload = {}) {
+  if (!Object.prototype.hasOwnProperty.call(context, 'identity')) return false
+
+  const contextIdentity = context.identity || {}
+  if (!hasAnyIdentity(contextIdentity)) return true
+
+  return identityFieldsMatch(contextIdentity, extractPayloadIdentity(payload))
+}
+
+function resolvePayload(options = {}) {
+  return options.payload && typeof options.payload === 'object' ? options.payload : options
+}
+
+export function clearRouteContext(options = {}) {
+  const payload = resolvePayload(options)
+  const cwd = options.cwd || payload.cwd || process.cwd()
+  clearCapsuleSection(cwd, 'route', { payload, env: options.env, ppid: options.ppid })
+}
+
+export function writeTurnTiming({ cwd, prompt = '', source = 'route', now = Date.now(), payload = {} } = {}) {
   const key = normalizePath(cwd)
   if (!key) return null
 
-  const store = readJsonFile(TURN_TIMING_PATH)
   const entry = {
     cwd: key,
     prompt: typeof prompt === 'string' ? prompt.trim().slice(0, 500) : '',
@@ -44,78 +88,68 @@ export function writeTurnTiming({ cwd, prompt = '', source = 'route', now = Date
     startedAt: now,
     startedAtIso: new Date(now).toISOString(),
   }
-  store[key] = entry
-  writeJsonFile(TURN_TIMING_PATH, store)
+  writeCapsuleSection(cwd, 'turn-timing', entry, { payload })
   return entry
 }
 
-export function readTurnTiming(cwd = process.cwd(), { now = Date.now() } = {}) {
+export function readTurnTiming(cwd = process.cwd(), { now = Date.now(), payload = {} } = {}) {
   const key = normalizePath(cwd)
   if (!key) return null
 
-  const store = readJsonFile(TURN_TIMING_PATH)
-  const entry = store[key]
+  const entry = readCapsuleSection(cwd, 'turn-timing', { payload })
   if (!entry?.startedAt || now - Number(entry.startedAt) > ROUTE_CONTEXT_TTL_MS) {
-    if (entry) {
-      delete store[key]
-      writeJsonFile(TURN_TIMING_PATH, store)
-    }
+    if (entry) clearCapsuleSection(cwd, 'turn-timing', { payload })
     return null
   }
   return entry
 }
 
-export function clearTurnTiming(cwd = process.cwd()) {
+export function clearTurnTiming(cwd = process.cwd(), { payload = {} } = {}) {
   const key = normalizePath(cwd)
   if (!key) return false
-
-  const store = readJsonFile(TURN_TIMING_PATH)
-  if (!(key in store)) return false
-  delete store[key]
-
-  const keys = Object.keys(store)
-  if (keys.length === 0) {
-    rmSync(TURN_TIMING_PATH, { force: true })
-  } else {
-    writeJsonFile(TURN_TIMING_PATH, store)
-  }
+  clearCapsuleSection(cwd, 'turn-timing', { payload })
   return true
 }
 
-export function writeRouteContext({ cwd, skillName, sourceSkillName = skillName }) {
-  ensureRuntimeDir()
+export function writeRouteContext({ cwd, skillName, sourceSkillName = skillName, payload = {}, env, ppid }) {
+  const scope = getRuntimeScope(cwd, { payload, env, ppid })
   const context = {
     cwd: normalizePath(cwd),
     skillName,
     sourceSkillName,
     zeroSideEffect: skillName === 'idea',
+    identity: extractPayloadIdentity(payload),
+    source: routeSource(payload),
+    promptHash: hashPrompt(payload.prompt),
+    scope: scope.scope,
+    key: scope.key,
     updatedAt: Date.now(),
   }
-  writeFileSync(ROUTE_CONTEXT_PATH, `${JSON.stringify(context, null, 2)}\n`, 'utf-8')
+  writeCapsuleSection(cwd, 'route', context, { payload, env, ppid })
 }
 
-export function readRouteContext() {
-  if (!existsSync(ROUTE_CONTEXT_PATH)) return null
-
-  try {
-    const context = JSON.parse(readFileSync(ROUTE_CONTEXT_PATH, 'utf-8'))
-    if (!context?.cwd || !context?.skillName || !context?.updatedAt) return null
-    if (Date.now() - context.updatedAt > ROUTE_CONTEXT_TTL_MS) {
-      clearRouteContext()
-      return null
-    }
-    return {
-      ...context,
-      cwd: normalizePath(context.cwd),
-    }
-  } catch {
+export function readRouteContext(options = {}) {
+  const payload = resolvePayload(options)
+  const cwd = options.cwd || payload.cwd || process.cwd()
+  const context = readCapsuleSection(cwd, 'route', { payload, env: options.env, ppid: options.ppid })
+  if (!context?.cwd || !context?.skillName || !context?.updatedAt) {
     return null
+  }
+  if (Date.now() - context.updatedAt > routeContextMaxAge(context)) {
+    clearRouteContext({ cwd, payload, env: options.env, ppid: options.ppid })
+    return null
+  }
+
+  return {
+    ...context,
+    cwd: normalizePath(context.cwd),
   }
 }
 
-export function getApplicableRouteContext({ cwd = '', filePath = '' } = {}) {
-  const context = readRouteContext()
+export function getApplicableRouteContext({ cwd = '', filePath = '', payload = {}, env, ppid } = {}) {
+  const context = readRouteContext({ cwd, payload, env, ppid })
   if (!context) return null
+  if (!payloadMatchesRouteContext(context, payload)) return null
 
   const normalizedCwd = normalizePath(cwd)
   if (normalizedCwd && normalizedCwd === context.cwd) {

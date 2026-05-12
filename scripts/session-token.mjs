@@ -7,6 +7,7 @@ const PAYLOAD_SESSION_KEYS = [
   'conversation',
   'threadId',
   'thread_id',
+  'thread-id',
   'thread',
   'windowId',
   'window_id',
@@ -14,8 +15,6 @@ const PAYLOAD_SESSION_KEYS = [
   'tabId',
   'tab_id',
   'tab',
-  'requestId',
-  'request_id',
 ]
 
 const ENV_SESSION_KEYS = [

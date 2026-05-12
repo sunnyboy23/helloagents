@@ -4,6 +4,10 @@ export function printDoctorText(runtime, report) {
     `配置:\n  package_version: ${report.config.packageVersion}\n  install_mode: ${report.config.installMode}\n  tracked_host_modes: ${JSON.stringify(report.config.trackedHostModes)}`,
     `Config:\n  package_version: ${report.config.packageVersion}\n  install_mode: ${report.config.installMode}\n  tracked_host_modes: ${JSON.stringify(report.config.trackedHostModes)}`,
   ))
+  console.log(runtime.msg(
+    `  runtime_root: ${report.config.runtimeRoot}`,
+    `  runtime_root: ${report.config.runtimeRoot}`,
+  ))
 
   for (const entry of report.hosts) {
     console.log(`\n${entry.label}:`)
@@ -20,7 +24,7 @@ export function printDoctorText(runtime, report) {
       console.log(`  issue[${issue.code}]: ${issue.message}`)
     }
     if (entry.suggestedFix) {
-      console.log(`  suggested_fix: ${entry.suggestedFix}`)
+      console.log(`  fix: ${entry.suggestedFix}`)
     }
   }
 

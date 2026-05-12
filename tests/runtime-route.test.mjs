@@ -7,11 +7,388 @@ import {
   createHomeFixture,
   createPackageFixture,
   createTempDir,
+  readJson,
   readText,
   runNode,
   writeText,
 } from './helpers/test-env.mjs'
-import { getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
+import { normalizeNotifyPayload } from '../scripts/notify-payload.mjs'
+import { getSessionEvidencePath, getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
+
+test('CLI runtime entry dispatches Codex notify payloads', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-codex-notify-')
+  const env = buildHomeEnv(home)
+
+  const result = runNode(join(pkgRoot, 'cli.mjs'), [
+    'codex-notify',
+    JSON.stringify({ type: 'noop', cwd: project }),
+  ], {
+    cwd: project,
+    env,
+  })
+
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
+test('notify payload normalization accepts Codex snake and kebab case fields', () => {
+  const payload = normalizeNotifyPayload({
+    session_id: 'session-1',
+    'turn-id': 'turn-1',
+    last_assistant_message: 'done',
+    input_messages: [
+      { content: [{ text: '~auto finish the task' }] },
+    ],
+  })
+
+  assert.equal(payload.sessionId, 'session-1')
+  assert.equal(payload.turnId, 'turn-1')
+  assert.equal(payload.lastAssistantMessage, 'done')
+  assert.equal(payload.prompt, '~auto finish the task')
+})
+
+test('Codex silent hooks do not emit additional context and de-duplicate Stop handling', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-codex-silent-hooks-')
+  const env = {
+    ...buildHomeEnv(home),
+    WT_SESSION: 'terminal-session-xyz999',
+  }
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+  const hookPayload = {
+    cwd: project,
+    session_id: '12345678',
+    turn_id: 'turn-1',
+  }
+
+  writeSettings(home)
+  writeText(join(project, '.helloagents', '.keep'), '')
+
+  let result = runNode(notifyScript, ['inject', '--codex', '--silent'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ ...hookPayload, source: 'startup' }),
+  })
+  let payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.hookSpecificOutput, undefined)
+
+  result = runNode(notifyScript, ['route', '--codex', '--silent'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ ...hookPayload, prompt: '~auto continue until done' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.hookSpecificOutput, undefined)
+
+  result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      payload: hookPayload,
+      role: 'main',
+      kind: 'waiting',
+      reasonCategory: 'missing-input',
+      reason: '当前阶段已完成，等待用户下一步。',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      ...hookPayload,
+      last_assistant_message: '我先停在这里，等你决定下一步。',
+    }),
+  })
+  payload = parseStdoutJson(result)
+  assert.equal(payload.decision, 'block')
+  assert.match(payload.reason, /显式 ~auto 本轮不应直接停下/)
+  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.turnId, 'turn-1')
+  assert.equal(evidence.source, 'stop')
+
+  result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify(hookPayload),
+  })
+  payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.decision, undefined)
+
+  result = runNode(join(pkgRoot, 'cli.mjs'), [
+    'codex-notify',
+    JSON.stringify({ ...hookPayload, type: 'agent-turn-complete' }),
+  ], {
+    cwd: project,
+    env,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  assert.equal(result.stdout, '')
+})
+
+test('Codex native notify writes closeout evidence before Stop and prevents double closeout', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-codex-notify-first-')
+  const env = {
+    ...buildHomeEnv(home),
+    WT_SESSION: 'terminal-session-xyz999',
+  }
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+  const hookPayload = {
+    cwd: project,
+    session_id: '12345678',
+    turn_id: 'turn-1',
+    last_assistant_message: '任务已完成。',
+  }
+
+  writeSettings(home)
+  writeText(join(project, '.helloagents', '.keep'), '')
+
+  let result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      payload: hookPayload,
+      role: 'main',
+      kind: 'complete',
+      phase: 'closeout',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(join(pkgRoot, 'cli.mjs'), [
+    'codex-notify',
+    JSON.stringify({ ...hookPayload, type: 'agent-turn-complete', client: 'codex-tui' }),
+  ], {
+    cwd: project,
+    env,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  assert.equal(result.stdout, '')
+
+  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.turnId, 'turn-1')
+  assert.equal(evidence.source, 'codex-notify')
+  assert.equal(evidence.turnKind, 'complete')
+
+  result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify(hookPayload),
+  })
+  const payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.decision, undefined)
+
+  evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.source, 'codex-notify')
+})
+
+test('Codex native notify consumes waiting closeout once and Stop does not synthesize complete', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-codex-notify-waiting-')
+  const env = {
+    ...buildHomeEnv(home),
+    WT_SESSION: 'terminal-session-xyz999',
+  }
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+  const hookPayload = {
+    cwd: project,
+    session_id: '12345678',
+    turn_id: 'turn-1',
+    last_assistant_message: '缺少输入文件，当前无法继续。',
+  }
+
+  writeSettings(home)
+  writeText(join(project, '.helloagents', '.keep'), '')
+
+  let result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      payload: hookPayload,
+      role: 'main',
+      kind: 'waiting',
+      phase: 'build',
+      reasonCategory: 'missing-file',
+      reason: '缺少 tests/fixtures/input.csv 文件，无法继续生成基线结果。',
+      blocker: {
+        target: 'tests/fixtures/input.csv',
+        evidence: '读取基线输入文件时文件不存在。',
+        requiredAction: '用户补充该文件或确认改用其他输入路径。',
+      },
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(join(pkgRoot, 'cli.mjs'), [
+    'codex-notify',
+    JSON.stringify({ ...hookPayload, type: 'agent-turn-complete', client: 'codex-tui' }),
+  ], {
+    cwd: project,
+    env,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  assert.equal(result.stdout, '')
+
+  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.source, 'codex-notify')
+  assert.equal(evidence.turnKind, 'waiting')
+
+  result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify(hookPayload),
+  })
+  const payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.decision, undefined)
+
+  evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.source, 'codex-notify')
+})
+
+test('Codex managed Stop hook takes over complete closeout and native notify stays silent', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-codex-managed-stop-')
+  const env = {
+    ...buildHomeEnv(home),
+    WT_SESSION: 'terminal-session-xyz999',
+  }
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+  const hookPayload = {
+    cwd: project,
+    session_id: '12345678',
+    turn_id: 'turn-1',
+    last_assistant_message: '任务已完成。',
+  }
+
+  writeSettings(home)
+  writeText(join(project, '.helloagents', '.keep'), '')
+  writeText(
+    join(home, '.codex', 'hooks.json'),
+    JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            matcher: '',
+            hooks: [
+              { type: 'command', command: 'helloagents-js notify stop --codex' },
+            ],
+          },
+        ],
+      },
+    }, null, 2) + '\n',
+  )
+
+  let result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      payload: hookPayload,
+      role: 'main',
+      kind: 'complete',
+      phase: 'closeout',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(join(pkgRoot, 'cli.mjs'), [
+    'codex-notify',
+    JSON.stringify({ ...hookPayload, type: 'agent-turn-complete', client: 'codex-tui' }),
+  ], {
+    cwd: project,
+    env,
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  assert.equal(result.stdout, '')
+
+  result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify(hookPayload),
+  })
+  const payload = parseStdoutJson(result)
+  assert.equal(payload.suppressOutput, true)
+  assert.equal(payload.decision, undefined)
+
+  const evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
+    session: '12345678',
+  }))
+  assert.equal(evidence.turnId, 'turn-1')
+  assert.equal(evidence.source, 'stop')
+  assert.equal(evidence.turnKind, 'complete')
+})
+
+test('project active session keeps hook and local turn-state writes in one directory', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-active-session-')
+  const env = {
+    ...buildHomeEnv(home),
+    WT_SESSION: 'terminal-session-xyz999',
+  }
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+  const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
+
+  writeSettings(home)
+  writeText(join(project, '.helloagents', '.keep'), '')
+
+  let result = runNode(notifyScript, ['route', '--codex', '--silent'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      session_id: 'codex-session-abcdef',
+      turn_id: 'turn-1',
+      prompt: '~plan build a demo',
+    }),
+  })
+  parseStdoutJson(result)
+
+  result = runNode(turnStateScript, ['write'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      role: 'main',
+      kind: 'complete',
+    }),
+  })
+  const payload = parseStdoutJson(result)
+
+  assert.match(payload.path, /[\\/]\.helloagents[\\/]sessions[\\/]workspace[\\/]abcdef[\\/]capsule\.json$/)
+  const active = readJson(join(project, '.helloagents', 'sessions', 'active.json'))
+  assert.equal(active.session, 'abcdef')
+  assert.equal(active.aliases.xyz999, 'abcdef')
+})
 
 test('notify inject and semantic route cover standby and recovery hints', () => {
   const { root: pkgRoot } = createPackageFixture()
@@ -29,9 +406,11 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
     input: JSON.stringify({ cwd: project, source: 'startup' }),
   })
   let payload = parseStdoutJson(result)
-  assert.match(payload.hookSpecificOutput.additionalContext, /HelloAGENTS \(Standby\)/)
-  assert.match(payload.hookSpecificOutput.additionalContext, /当前 HelloAGENTS 包根目录/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /# HelloAGENTS\b/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /当前 HelloAGENTS 运行根目录/)
   assert.match(payload.hookSpecificOutput.additionalContext, /本轮 HelloAGENTS 读取根目录/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /turnStateCommand/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /helloagents-turn-state write/)
   assert.match(payload.hookSpecificOutput.additionalContext, /统一执行流程/)
 
   result = runNode(notifyScript, ['route'], {
@@ -59,7 +438,6 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   })
   payload = parseStdoutJson(result)
   assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]fullstack[\\/]SKILL\.md/)
-  assert.match(readText(join(home, '.helloagents', 'runtime', 'turn-timing.json')), /~fullstack status/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
@@ -89,6 +467,25 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   assert.match(payload.hookSpecificOutput.additionalContext, /统一执行流程/)
   assert.match(payload.hookSpecificOutput.additionalContext, /会话已恢复\/压缩/)
   assert.match(payload.hookSpecificOutput.additionalContext, /先看当前用户消息，如果仍是同一任务/)
+
+  const nested = join(project, 'packages', 'app')
+  writeText(join(nested, 'index.js'), 'console.log("ok")\n')
+
+  result = runNode(notifyScript, ['inject'], {
+    cwd: nested,
+    env,
+    input: JSON.stringify({ cwd: nested, source: 'startup' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /## 统一执行流程/)
+
+  result = runNode(notifyScript, ['route'], {
+    cwd: nested,
+    env,
+    input: JSON.stringify({ cwd: nested, prompt: 'continue the existing feature flow' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /请根据用户请求的真实意图选路/)
 
   result = runNode(notifyScript, ['pre-compact'], {
     cwd: project,
@@ -190,7 +587,7 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   })
   payload = parseStdoutJson(result)
   assert.equal(payload.hookSpecificOutput.permissionDecision, 'deny')
-  assert.match(payload.hookSpecificOutput.permissionDecisionReason, /side-effect command/)
+  assert.match(payload.hookSpecificOutput.permissionDecisionReason, /有副作用命令/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
@@ -201,7 +598,39 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   assert.match(payload.hookSpecificOutput.additionalContext, /~verify=审查\/验证/)
 })
 
-test('notify route keeps standby command skills on home roots even if project-level skill dirs exist', () => {
+test('notify runtime uses host_install_modes before global install_mode', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-route-host-mode-')
+  const env = buildHomeEnv(home)
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home, {
+    install_mode: 'standby',
+    host_install_modes: {
+      codex: 'global',
+    },
+  })
+
+  let result = runNode(notifyScript, ['inject', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, source: 'startup' }),
+  })
+  let payload = parseStdoutJson(result)
+  assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /HelloAGENTS \(Standby\)/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /## 统一执行流程/)
+
+  result = runNode(notifyScript, ['route', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: 'create a new app for expenses' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /请根据用户请求的真实意图选路/)
+})
+
+test('notify route keeps command skills on the runtime root even if project-level skill dirs exist', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
   const project = createTempDir('helloagents-codex-route-')
@@ -209,9 +638,6 @@ test('notify route keeps standby command skills on home roots even if project-le
   const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
 
   writeSettings(home, { install_mode: 'standby' })
-  writeText(join(home, '.claude', 'helloagents', '.keep'), '')
-  writeText(join(home, '.gemini', 'helloagents', '.keep'), '')
-  writeText(join(home, '.codex', 'helloagents', '.keep'), '')
   writeText(join(project, 'skills', 'helloagents', '.keep'), '')
   writeText(join(project, '.claude', 'skills', 'helloagents', '.keep'), '')
   writeText(join(project, '.gemini', 'skills', 'helloagents', '.keep'), '')
@@ -223,8 +649,8 @@ test('notify route keeps standby command skills on home roots even if project-le
     input: JSON.stringify({ cwd: project, prompt: '~help' }),
   })
   let payload = parseStdoutJson(result)
-  const claudeSkillPath = join(home, '.claude', 'helloagents', 'skills', 'commands', 'help', 'SKILL.md')
-  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(claudeSkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  const runtimeSkillPath = join(pkgRoot, 'skills', 'commands', 'help', 'SKILL.md')
+  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(runtimeSkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /skills[\\/]helloagents[\\/]skills[\\/]commands[\\/]help[\\/]SKILL\.md/)
 
   result = runNode(notifyScript, ['route', '--gemini'], {
@@ -233,8 +659,7 @@ test('notify route keeps standby command skills on home roots even if project-le
     input: JSON.stringify({ cwd: project, prompt: '~help' }),
   })
   payload = parseStdoutJson(result)
-  const geminiSkillPath = join(home, '.gemini', 'helloagents', 'skills', 'commands', 'help', 'SKILL.md')
-  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(geminiSkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(runtimeSkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /skills[\\/]helloagents[\\/]skills[\\/]commands[\\/]help[\\/]SKILL\.md/)
 
   result = runNode(notifyScript, ['route', '--codex'], {
@@ -243,7 +668,6 @@ test('notify route keeps standby command skills on home roots even if project-le
     input: JSON.stringify({ cwd: project, prompt: '~help' }),
   })
   payload = parseStdoutJson(result)
-  const standbySkillPath = join(home, '.codex', 'helloagents', 'skills', 'commands', 'help', 'SKILL.md')
-  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(standbySkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(payload.hookSpecificOutput.additionalContext, new RegExp(runtimeSkillPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /skills[\\/]helloagents[\\/]skills[\\/]commands[\\/]help[\\/]SKILL\.md/)
 })

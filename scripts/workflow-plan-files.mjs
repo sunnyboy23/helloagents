@@ -23,7 +23,7 @@ const PLAN_TEMPLATE_MARKERS = {
   'tasks.md': [
     /# \{项目\/功能名称\} — 任务分解/,
     /\[按执行顺序排列，每个任务独立可验证\]/,
-    /- \[ \] 任务1：描述/,
+    /- \[ \] 任务1（AFK\/HITL）：端到端行为描述/,
   ],
 }
 
@@ -167,7 +167,7 @@ function findTemplateIssues(fileName, filePath) {
   const content = readText(filePath)
   return (PLAN_TEMPLATE_MARKERS[fileName] || [])
     .filter((pattern) => pattern.test(content))
-    .map(() => `${fileName} still contains template placeholders`)
+    .map(() => `${fileName} 仍包含模板占位内容`)
 }
 
 function comparePlanEntries(a, b) {
@@ -187,7 +187,7 @@ export function readStateSnapshot(cwd, options = {}) {
     stateScope: stateScope.stateScope,
     stateSessionToken: stateScope.stateSessionToken,
     stateSessionMode: stateScope.stateSessionMode,
-    stateBranch: stateScope.stateBranch,
+    stateWorkspace: stateScope.stateWorkspace,
     sessionScoped: stateScope.stateScope === 'session',
     exists,
     content,
