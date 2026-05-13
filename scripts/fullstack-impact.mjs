@@ -262,11 +262,14 @@ export function getDownstreamProjects(config, projectPath) {
   return downstream
 }
 
-export function topologicalSort(projects, deps) {
+export function topologicalSort(projects, deps, options = {}) {
+  const { ownerService = null } = options
+  const effectiveDeps = resolveCircularDeps(projects, deps, ownerService)
+
   const inDegree = Object.fromEntries(projects.map((project) => [project, 0]))
 
   projects.forEach((project) => {
-    ;((deps[project] && deps[project].depends_on) || []).forEach((dependency) => {
+    ;((effectiveDeps[project] && effectiveDeps[project].depends_on) || []).forEach((dependency) => {
       if (dependency in inDegree) inDegree[project] += 1
     })
   })
@@ -282,12 +285,44 @@ export function topologicalSort(projects, deps) {
     layers.push(layer)
     layer.forEach((project) => remaining.delete(project))
     ;[...remaining].forEach((project) => {
-      ;((deps[project] && deps[project].depends_on) || []).forEach((dependency) => {
+      ;((effectiveDeps[project] && effectiveDeps[project].depends_on) || []).forEach((dependency) => {
         if (layer.includes(dependency)) inDegree[project] -= 1
       })
     })
   }
   return layers
+}
+
+function resolveCircularDeps(projects, deps, ownerService) {
+  const cycles = findCycles(projects, deps)
+  if (!cycles.length) return deps
+
+  const resolved = {}
+  for (const [path, depInfo] of Object.entries(deps)) {
+    resolved[path] = { depends_on: [...(depInfo.depends_on || [])] }
+  }
+
+  for (const cycle of cycles) {
+    const nodesInCycle = [...new Set(cycle.slice(0, -1))]
+    if (nodesInCycle.length < 2) continue
+
+    if (ownerService && nodesInCycle.includes(ownerService)) {
+      for (const node of nodesInCycle) {
+        if (node === ownerService) continue
+        if (resolved[ownerService]) {
+          resolved[ownerService].depends_on = resolved[ownerService].depends_on.filter((d) => d !== node)
+        }
+      }
+    } else {
+      const first = nodesInCycle[0]
+      const second = nodesInCycle[1]
+      if (resolved[first]) {
+        resolved[first].depends_on = resolved[first].depends_on.filter((d) => d !== second)
+      }
+    }
+  }
+
+  return resolved
 }
 
 function buildTaskContract(config, project, deps, engineer) {
@@ -338,7 +373,8 @@ function buildTaskContract(config, project, deps, engineer) {
   }
 }
 
-export function buildDispatchPlan(config, projects, deps) {
+export function buildDispatchPlan(config, projects, deps, options = {}) {
+  const { ownerService = null } = options
   const assignments = []
   const dispatchableProjects = []
   const unassignedProjects = []
@@ -389,7 +425,7 @@ export function buildDispatchPlan(config, projects, deps) {
     dispatchable_projects: [...new Set(dispatchableProjects)].sort(),
     unassigned_projects: [...new Set(unassignedProjects)].sort(),
     grouped_by_engineer_type: groupedByEngineerType,
-    dispatch_execution_order: dispatchableProjects.length ? topologicalSort(dispatchableProjects, deps) : [],
+    dispatch_execution_order: dispatchableProjects.length ? topologicalSort(dispatchableProjects, deps, { ownerService }) : [],
     continue_execution: dispatchableProjects.length > 0,
     advisory_only_unassigned: true,
     warnings,
@@ -415,11 +451,13 @@ export function analyzeImpact(config, affectedProjects) {
   affectedProjects.forEach((project) => findDownstream(project, visited))
   const allAffectedList = [...allAffected]
 
+  const ownerService = affectedProjects[0] || null
+
   return {
     directly_affected: affectedProjects,
     all_affected: allAffectedList,
-    execution_order: topologicalSort(allAffectedList, deps),
-    dispatch_plan: buildDispatchPlan(config, allAffectedList, deps),
+    execution_order: topologicalSort(allAffectedList, deps, { ownerService }),
+    dispatch_plan: buildDispatchPlan(config, allAffectedList, deps, { ownerService }),
   }
 }
 
