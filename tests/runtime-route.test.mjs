@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -13,7 +14,12 @@ import {
   writeText,
 } from './helpers/test-env.mjs'
 import { normalizeNotifyPayload } from '../scripts/notify-payload.mjs'
-import { getSessionEvidencePath, getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
+import {
+  getSessionStatePath,
+  parseStdoutJson,
+  readCodexNotifySlot,
+  writeSettings,
+} from './helpers/runtime-test-helpers.mjs'
 
 test('CLI runtime entry dispatches Codex notify payloads', () => {
   const { root: pkgRoot } = createPackageFixture()
@@ -109,10 +115,8 @@ test('Codex silent hooks do not emit additional context and de-duplicate Stop ha
   })
   payload = parseStdoutJson(result)
   assert.equal(payload.decision, 'block')
-  assert.match(payload.reason, /显式 ~auto 本轮不应直接停下/)
-  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  assert.match(payload.reason, /显式 ~auto 当前对话不应直接停下/)
+  let evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.turnId, 'turn-1')
   assert.equal(evidence.source, 'stop')
 
@@ -179,9 +183,7 @@ test('Codex native notify writes closeout evidence before Stop and prevents doub
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.equal(result.stdout, '')
 
-  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  let evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.turnId, 'turn-1')
   assert.equal(evidence.source, 'codex-notify')
   assert.equal(evidence.turnKind, 'complete')
@@ -195,9 +197,7 @@ test('Codex native notify writes closeout evidence before Stop and prevents doub
   assert.equal(payload.suppressOutput, true)
   assert.equal(payload.decision, undefined)
 
-  evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.source, 'codex-notify')
 })
 
@@ -251,9 +251,7 @@ test('Codex native notify consumes waiting closeout once and Stop does not synth
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.equal(result.stdout, '')
 
-  let evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  let evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.source, 'codex-notify')
   assert.equal(evidence.turnKind, 'waiting')
 
@@ -266,9 +264,7 @@ test('Codex native notify consumes waiting closeout once and Stop does not synth
   assert.equal(payload.suppressOutput, true)
   assert.equal(payload.decision, undefined)
 
-  evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.source, 'codex-notify')
 })
 
@@ -339,9 +335,7 @@ test('Codex managed Stop hook takes over complete closeout and native notify sta
   assert.equal(payload.suppressOutput, true)
   assert.equal(payload.decision, undefined)
 
-  const evidence = readJson(getSessionEvidencePath(project, 'codex-native-stop.json', {
-    session: '12345678',
-  }))
+  const evidence = readCodexNotifySlot(home, 'nativeStop')
   assert.equal(evidence.turnId, 'turn-1')
   assert.equal(evidence.source, 'stop')
   assert.equal(evidence.turnKind, 'complete')
@@ -384,10 +378,10 @@ test('project active session keeps hook and local turn-state writes in one direc
   })
   const payload = parseStdoutJson(result)
 
-  assert.match(payload.path, /[\\/]\.helloagents[\\/]sessions[\\/]workspace[\\/]abcdef[\\/]capsule\.json$/)
+  assert.match(payload.path, /[\\/]\.helloagents[\\/]sessions[\\/]workspace[\\/]host-abcdef[\\/]STATE\.md$/)
   const active = readJson(join(project, '.helloagents', 'sessions', 'active.json'))
-  assert.equal(active.session, 'abcdef')
-  assert.equal(active.aliases.xyz999, 'abcdef')
+  assert.equal(active.session, 'host-abcdef')
+  assert.equal(active.aliases.xyz999, 'host-abcdef')
 })
 
 test('notify inject and semantic route cover standby and recovery hints', () => {
@@ -408,10 +402,20 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   let payload = parseStdoutJson(result)
   assert.match(payload.hookSpecificOutput.additionalContext, /# HelloAGENTS\b/)
   assert.match(payload.hookSpecificOutput.additionalContext, /当前 HelloAGENTS 运行根目录/)
-  assert.match(payload.hookSpecificOutput.additionalContext, /本轮 HelloAGENTS 读取根目录/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /当前对话 HelloAGENTS 读取根目录/)
   assert.match(payload.hookSpecificOutput.additionalContext, /turnStateCommand/)
   assert.match(payload.hookSpecificOutput.additionalContext, /helloagents-turn-state write/)
   assert.match(payload.hookSpecificOutput.additionalContext, /统一执行流程/)
+  assert.equal(existsSync(join(project, '.helloagents')), false)
+
+  result = runNode(notifyScript, ['inject'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, source: 'resume' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.equal(existsSync(join(project, '.helloagents')), false)
+  assert.doesNotMatch(payload.hookSpecificOutput.additionalContext, /会话已恢复\/压缩/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
@@ -426,10 +430,10 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
     env,
-    input: JSON.stringify({ cwd: project, prompt: '~wiki' }),
+    input: JSON.stringify({ cwd: project, prompt: '~init' }),
   })
   payload = parseStdoutJson(result)
-  assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]wiki[\\/]SKILL\.md/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]init[\\/]SKILL\.md/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
@@ -457,6 +461,16 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   assert.equal(payload.suppressOutput, true)
   assert.equal(payload.hookSpecificOutput, undefined)
 
+  writeText(
+    join(project, 'CLAUDE.md'),
+    [
+      '<!-- HELLOAGENTS_PROFILE: full -->',
+      '<!-- HELLOAGENTS_START -->',
+      '# initialized project marker',
+      '<!-- HELLOAGENTS_END -->',
+      '',
+    ].join('\n'),
+  )
   writeText(getSessionStatePath(project), '# activated\n')
   result = runNode(notifyScript, ['inject'], {
     cwd: project,
@@ -505,10 +519,19 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
   payload = parseStdoutJson(result)
   assert.match(payload.hookSpecificOutput.additionalContext, /请根据用户请求的真实意图选路/)
   assert.match(payload.hookSpecificOutput.additionalContext, /不依赖关键词表/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /若当前任务由上级代理、控制器或宿主协作\/委派机制创建/)
   assert.match(payload.hookSpecificOutput.additionalContext, /Delivery Tier: T0=探索\/比较/)
   assert.match(payload.hookSpecificOutput.additionalContext, /默认先走 ~plan \/ ~prd/)
   assert.match(payload.hookSpecificOutput.additionalContext, /当前活跃 plan \/ PRD/)
   assert.match(payload.hookSpecificOutput.additionalContext, /状态文件只用于找回上次停在哪/)
+
+  result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: '[子代理任务] 只审查 auth 目录并把结果交回控制器' }),
+  })
+  payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /若当前任务由上级代理、控制器或宿主协作\/委派机制创建/)
 
   writeText(
     join(project, '.helloagents', 'plans', '202604040101_missing-state', 'requirements.md'),
@@ -595,7 +618,7 @@ test('notify inject and semantic route cover standby and recovery hints', () => 
     input: JSON.stringify({ cwd: project, prompt: 'run tests and do a security review for auth changes' }),
   })
   payload = parseStdoutJson(result)
-  assert.match(payload.hookSpecificOutput.additionalContext, /~verify=审查\/验证/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /~qa=统一质量审查\/验证\/修复\/收尾/)
 })
 
 test('notify runtime uses host_install_modes before global install_mode', () => {
@@ -628,6 +651,53 @@ test('notify runtime uses host_install_modes before global install_mode', () => 
   })
   payload = parseStdoutJson(result)
   assert.match(payload.hookSpecificOutput.additionalContext, /请根据用户请求的真实意图选路/)
+})
+
+test('project initialized marker switches semantic route to full bootstrap in standby mode', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-route-global-marker-')
+  const env = buildHomeEnv(home)
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home, { install_mode: 'standby' })
+  writeText(
+    join(project, 'AGENTS.md'),
+    [
+      '<!-- HELLOAGENTS_PROFILE: full -->',
+      '<!-- HELLOAGENTS_START -->',
+      '# initialized project marker',
+      '<!-- HELLOAGENTS_END -->',
+      '',
+    ].join('\n'),
+  )
+
+  const result = runNode(notifyScript, ['route', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: 'create a new app for expenses' }),
+  })
+  const payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /请根据用户请求的真实意图选路/)
+})
+
+test('non-readonly command route creates project-local state in non-full standby project', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const project = createTempDir('helloagents-route-local-state-')
+  const env = buildHomeEnv(home)
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home, { install_mode: 'standby' })
+
+  const result = runNode(notifyScript, ['route'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({ cwd: project, prompt: '~build finish the current task' }),
+  })
+  const payload = parseStdoutJson(result)
+  assert.match(payload.hookSpecificOutput.additionalContext, /skills[\\/]commands[\\/]build[\\/]SKILL\.md/)
+  assert.equal(existsSync(join(project, '.helloagents', 'sessions', 'workspace', 'default', 'STATE.md')), true)
 })
 
 test('notify route keeps command skills on the runtime root even if project-level skill dirs exist', () => {

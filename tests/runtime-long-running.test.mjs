@@ -6,12 +6,11 @@ import { join } from 'node:path'
 import {
   createHomeFixture,
   createTempDir,
-  readJson,
   runCommand,
   writeJson,
   writeText,
 } from './helpers/test-env.mjs'
-import { getSessionCapsulePath } from '../scripts/session-capsule.mjs'
+import { readSessionCapsule, writeSessionCapsule } from '../scripts/session-capsule.mjs'
 import {
   UNBOUND_ROUTE_CONTEXT_TTL_MS,
   getApplicableRouteContext,
@@ -24,8 +23,10 @@ import {
   captureWorkspaceFingerprint,
   EVIDENCE_MAX_AGE_MS,
 } from '../scripts/runtime-artifacts.mjs'
-import { getVerifyEvidenceStatus, writeVerifyEvidence } from '../scripts/verify-state.mjs'
+import { getQaReviewEvidenceStatus, writeQaReviewEvidence } from '../scripts/qa-review-state.mjs'
 import {
+  STANDARD_RUNTIME_TTL_HOURS,
+  STANDARD_RUNTIME_TTL_MS,
   LONG_RUNNING_TTL_HOURS,
   LONG_RUNNING_TTL_MS,
   ROUTE_CONTEXT_TTL_MS,
@@ -40,18 +41,18 @@ function activateProject(project) {
 }
 
 function writeCapsuleRouteUpdatedAt(project, updatedAt, payload = SESSION_PAYLOAD) {
-  const capsulePath = getSessionCapsulePath(project, { payload })
-  const capsule = readJson(capsulePath)
+  const capsule = readSessionCapsule(project, { payload })
   capsule.route.updatedAt = updatedAt
-  writeJson(capsulePath, capsule)
+  writeSessionCapsule(project, capsule, { payload })
 }
 
 test('long-running runtime TTLs stay aligned for Codex goal sessions', () => {
   assert.equal(LONG_RUNNING_TTL_HOURS, 720)
-  assert.equal(ROUTE_CONTEXT_TTL_MS, LONG_RUNNING_TTL_MS)
-  assert.equal(TURN_STATE_TTL_MS, LONG_RUNNING_TTL_MS)
-  assert.equal(EVIDENCE_MAX_AGE_MS, LONG_RUNNING_TTL_MS)
-  assert.equal(USER_RUNTIME_MAX_AGE_MS, LONG_RUNNING_TTL_MS)
+  assert.equal(STANDARD_RUNTIME_TTL_HOURS, 72)
+  assert.equal(ROUTE_CONTEXT_TTL_MS, STANDARD_RUNTIME_TTL_MS)
+  assert.equal(TURN_STATE_TTL_MS, STANDARD_RUNTIME_TTL_MS)
+  assert.equal(EVIDENCE_MAX_AGE_MS, STANDARD_RUNTIME_TTL_MS)
+  assert.equal(USER_RUNTIME_MAX_AGE_MS, STANDARD_RUNTIME_TTL_MS)
 })
 
 test('route context remains valid for long-running goal sessions', () => {
@@ -64,10 +65,10 @@ test('route context remains valid for long-running goal sessions', () => {
     payload: SESSION_PAYLOAD,
   })
 
-  writeCapsuleRouteUpdatedAt(project, Date.now() - (LONG_RUNNING_TTL_HOURS - 1) * HOURS)
+  writeCapsuleRouteUpdatedAt(project, Date.now() - (STANDARD_RUNTIME_TTL_HOURS - 1) * HOURS)
   assert.equal(readRouteContext({ cwd: project, payload: SESSION_PAYLOAD })?.skillName, 'auto')
 
-  writeCapsuleRouteUpdatedAt(project, Date.now() - (LONG_RUNNING_TTL_HOURS + 1) * HOURS)
+  writeCapsuleRouteUpdatedAt(project, Date.now() - (STANDARD_RUNTIME_TTL_HOURS + 1) * HOURS)
   assert.equal(readRouteContext({ cwd: project, payload: SESSION_PAYLOAD }), null)
 })
 
@@ -148,31 +149,36 @@ test('turn-state and evidence stay valid across long-running goal sessions', () 
     ...SESSION_PAYLOAD,
     role: 'main',
     kind: 'complete',
-    phase: 'verify',
+    phase: 'qa',
   })
-  const validNow = Date.parse(turn.updatedAt) + (LONG_RUNNING_TTL_HOURS - 1) * HOURS
-  const staleNow = Date.parse(turn.updatedAt) + (LONG_RUNNING_TTL_HOURS + 1) * HOURS
+  const validNow = Date.parse(turn.updatedAt) + (STANDARD_RUNTIME_TTL_HOURS - 1) * HOURS
+  const staleNow = Date.parse(turn.updatedAt) + (STANDARD_RUNTIME_TTL_HOURS + 1) * HOURS
   assert.equal(readTurnState(project, { now: validNow, payload: SESSION_PAYLOAD })?.kind, 'complete')
 
-  writeVerifyEvidence(project, {
+  writeQaReviewEvidence(project, {
+    qaMode: 'standard',
+    outcome: 'clean',
+    conclusion: '长任务质量闭环通过。',
     commands: ['npm run test'],
     source: 'test',
   }, {
     payload: SESSION_PAYLOAD,
   })
 
-  let status = getVerifyEvidenceStatus(project, {
+  let status = getQaReviewEvidenceStatus(project, {
+    required: true,
     now: validNow,
     payload: SESSION_PAYLOAD,
   })
   assert.equal(status.status, 'valid')
 
-  status = getVerifyEvidenceStatus(project, {
+  status = getQaReviewEvidenceStatus(project, {
+    required: true,
     now: staleNow,
     payload: SESSION_PAYLOAD,
   })
   assert.equal(status.status, 'stale-time')
-  assert.match(status.details.join('\n'), /超过 720 小时/)
+  assert.match(status.details.join('\n'), /超过 72 小时/)
 })
 
 test('transient runtime cleanup keeps sessions inside the long-running TTL window', () => {
@@ -181,18 +187,18 @@ test('transient runtime cleanup keeps sessions inside the long-running TTL windo
   const freshDir = join(runtimeRoot, 'fresh-goal-session')
   const staleDir = join(runtimeRoot, 'stale-goal-session')
   const now = Date.now()
-  const freshDate = new Date(now - (LONG_RUNNING_TTL_HOURS - 1) * HOURS)
-  const staleDate = new Date(now - (LONG_RUNNING_TTL_HOURS + 1) * HOURS)
+  const freshDate = new Date(now - (STANDARD_RUNTIME_TTL_HOURS - 1) * HOURS)
+  const staleDate = new Date(now - (STANDARD_RUNTIME_TTL_HOURS + 1) * HOURS)
 
-  writeText(join(freshDir, 'capsule.json'), '{}\n')
-  writeText(join(staleDir, 'capsule.json'), '{}\n')
+  writeText(join(freshDir, 'STATE.md'), '# fresh\n')
+  writeText(join(staleDir, 'STATE.md'), '# stale\n')
   utimesSync(freshDir, freshDate, freshDate)
   utimesSync(staleDir, staleDate, staleDate)
 
   const result = cleanupUserRuntimeRoot({ home, now })
   assert.equal(result.errors.length, 0)
   assert.deepEqual(result.removedExpiredDirs, [staleDir])
-  assert.equal(existsSync(join(freshDir, 'capsule.json')), true)
+  assert.equal(existsSync(join(freshDir, 'STATE.md')), true)
 })
 
 test('workspace fingerprint includes git HEAD so committed changes invalidate old evidence', () => {

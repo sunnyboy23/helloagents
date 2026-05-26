@@ -112,7 +112,8 @@ export function clearTurnTiming(cwd = process.cwd(), { payload = {} } = {}) {
 }
 
 export function writeRouteContext({ cwd, skillName, sourceSkillName = skillName, payload = {}, env, ppid }) {
-  const scope = getRuntimeScope(cwd, { payload, env, ppid })
+  const shouldEnsureProjectLocal = skillName !== 'idea' && skillName !== 'help'
+  const scope = getRuntimeScope(cwd, { payload, env, ppid, ensureProjectLocal: shouldEnsureProjectLocal })
   const context = {
     cwd: normalizePath(cwd),
     skillName,
@@ -125,7 +126,18 @@ export function writeRouteContext({ cwd, skillName, sourceSkillName = skillName,
     key: scope.key,
     updatedAt: Date.now(),
   }
-  writeCapsuleSection(cwd, 'route', context, { payload, env, ppid })
+  writeCapsuleSection(cwd, 'route', context, {
+    payload,
+    env,
+    ppid,
+    ensureProjectLocal: shouldEnsureProjectLocal,
+    stateSeed: {
+      goal: `执行 ~${sourceSkillName}`,
+      doing: `已进入 ~${sourceSkillName} 路由`,
+      context: '由运行时首次进入非只读命令时创建；后续按实际任务重写',
+      next: `读取并执行 ~${skillName} 对应流程`,
+    },
+  })
 }
 
 export function readRouteContext(options = {}) {

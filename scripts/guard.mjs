@@ -76,7 +76,7 @@ function buildHighRiskGate(matches, cwd, payload = {}) {
   if (!recommendation) return null
   if (matches.some((match) => match.gate === 'post-verify')) {
     return {
-      reason: `[HelloAGENTS Guard] 已阻止 T3 命令：当前工作流尚未进入 VERIFY / CONSOLIDATE。\n当前工作流：${recommendation.summary}\n处理路径：${recommendation.nextPath}\n${recommendation.guidance}`,
+      reason: `[HelloAGENTS Guard] 已阻止 T3 命令：当前工作流尚未进入 QA / CONSOLIDATE。\n当前工作流：${recommendation.summary}\n处理路径：${recommendation.nextPath}\n${recommendation.guidance}`,
     }
   }
   if (matches.some((match) => match.gate === 'plan-first') && recommendation.nextCommand === 'plan') {
@@ -133,7 +133,7 @@ function buildPostWriteWarnings(data) {
   const filePath = data.tool_input?.file_path || ''
   return [
     ...(detectIdeaBoundaryContext(data)?.zeroSideEffect
-      ? ['~idea 本轮要求只读探索；检测到写入文件的工具调用，请回到探索输出，或升级到 ~plan / ~build / ~prd / ~auto 后再修改文件']
+      ? ['~idea 当前任务要求只读探索；检测到写入文件的工具调用，请回到探索输出，或升级到 ~plan / ~build / ~prd / ~auto 后再修改文件']
       : []),
     ...scanUnrequestedFiles(filePath, data.tool_name),
     ...(content ? [...scanForSecrets(content), ...scanDangerousPackages(content, filePath)] : []),

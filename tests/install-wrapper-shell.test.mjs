@@ -52,7 +52,7 @@ function createFakeNpm(binDir, logPath) {
     [
       '#!/bin/sh',
       'joined="$*"',
-      'printf \'args=%s|deploy=%s|target=%s|mode=%s|branch=%s|package=%s\\n\' "$joined" "${HELLOAGENTS_DEPLOY:-}" "${HELLOAGENTS_TARGET:-}" "${HELLOAGENTS_MODE:-}" "${HELLOAGENTS_BRANCH:-}" "${HELLOAGENTS_PACKAGE:-}" >> "$FAKE_NPM_LOG"',
+      'printf \'args=%s|deploy=%s|target=%s|mode=%s|branch=%s|package=%s|compact=%s\\n\' "$joined" "${HELLOAGENTS_DEPLOY:-}" "${HELLOAGENTS_TARGET:-}" "${HELLOAGENTS_MODE:-}" "${HELLOAGENTS_BRANCH:-}" "${HELLOAGENTS_PACKAGE:-}" "${HELLOAGENTS:-}" >> "$FAKE_NPM_LOG"',
       'if [ -n "${FAKE_NPM_FAIL_MATCH:-}" ] && [ "$joined" = "$FAKE_NPM_FAIL_MATCH" ]; then',
       '  exit 1',
       'fi',
@@ -125,8 +125,45 @@ test('install.sh install forwards postinstall deploy env for compact host mode s
   assert.equal(entries[0].mode, 'global')
 })
 
+test('install.sh install without an explicit target only installs the package', { skip: !POSIX_SHELL }, () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const { logPath, env } = createScriptEnv(home, {
+    HELLOAGENTS_ACTION: 'install',
+  })
+
+  runInstallSh(pkgRoot, home, env)
+
+  const entries = readLogEntries(logPath)
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].args, 'install -g helloagents')
+  assert.equal(entries[0].deploy, '')
+  assert.equal(entries[0].target, '')
+  assert.equal(entries[0].mode, '')
+  assert.equal(entries[0].compact, '')
+})
+
+test('install.sh update without an explicit target only updates the package', { skip: !POSIX_SHELL }, () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const { logPath, env } = createScriptEnv(home, {
+    HELLOAGENTS_ACTION: 'update',
+  })
+
+  runInstallSh(pkgRoot, home, env)
+
+  const entries = readLogEntries(logPath)
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].args, 'update -g helloagents')
+  assert.equal(entries[0].deploy, '')
+  assert.equal(entries[0].target, '')
+  assert.equal(entries[0].mode, '')
+  assert.equal(entries[0].compact, '')
+})
+
 test('install.sh update, cleanup, switch-branch, and uninstall dispatch the expected npm commands', { skip: !POSIX_SHELL }, () => {
   const { root: pkgRoot } = createPackageFixture()
+  const customPackage = 'https://example.com/helloagents-custom.tgz'
 
   {
     const home = createHomeFixture()
@@ -139,9 +176,26 @@ test('install.sh update, cleanup, switch-branch, and uninstall dispatch the expe
     runInstallSh(pkgRoot, home, env)
     const entries = readLogEntries(logPath)
     assert.deepEqual(entries.map((entry) => entry.args), [
-      'install -g github:hellowind777/helloagents#beta',
+      'install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz',
       'explore -g helloagents -- npm run sync-hosts -- codex --standby',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
+  }
+
+  {
+    const home = createHomeFixture()
+    const { logPath, env } = createScriptEnv(home, {
+      HELLOAGENTS_ACTION: 'update',
+      HELLOAGENTS_PACKAGE: customPackage,
+      HELLOAGENTS_TARGET: 'codex',
+    })
+    runInstallSh(pkgRoot, home, env)
+    const entries = readLogEntries(logPath)
+    assert.deepEqual(entries.map((entry) => entry.args), [
+      `install -g ${customPackage}`,
+      'explore -g helloagents -- npm run sync-hosts -- codex',
+    ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 
   {
@@ -156,6 +210,7 @@ test('install.sh update, cleanup, switch-branch, and uninstall dispatch the expe
     assert.deepEqual(entries.map((entry) => entry.args), [
       'explore -g helloagents -- npm run cleanup-hosts -- --all --global',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 
   {
@@ -169,9 +224,27 @@ test('install.sh update, cleanup, switch-branch, and uninstall dispatch the expe
     runInstallSh(pkgRoot, home, env)
     const entries = readLogEntries(logPath)
     assert.deepEqual(entries.map((entry) => entry.args), [
-      'install -g github:hellowind777/helloagents#beta',
+      'install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz',
       'explore -g helloagents -- npm run sync-hosts -- gemini --global',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
+  }
+
+  {
+    const home = createHomeFixture()
+    const { logPath, env } = createScriptEnv(home, {
+      HELLOAGENTS_ACTION: 'switch-branch',
+      HELLOAGENTS_PACKAGE: customPackage,
+      HELLOAGENTS_TARGET: 'gemini',
+      HELLOAGENTS_MODE: 'global',
+    })
+    runInstallSh(pkgRoot, home, env)
+    const entries = readLogEntries(logPath)
+    assert.deepEqual(entries.map((entry) => entry.args), [
+      `install -g ${customPackage}`,
+      'explore -g helloagents -- npm run sync-hosts -- gemini --global',
+    ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 
   {
@@ -200,6 +273,7 @@ test('install.sh update, cleanup, switch-branch, and uninstall dispatch the expe
       'explore -g helloagents -- npm run uninstall -- claude --global',
       'uninstall -g helloagents',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 })
 
@@ -218,6 +292,7 @@ test('install.sh omits the mode for non-install actions so the CLI can reuse tra
       'update -g helloagents',
       'explore -g helloagents -- npm run sync-hosts -- codex',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 
   {
@@ -231,6 +306,7 @@ test('install.sh omits the mode for non-install actions so the CLI can reuse tra
     assert.deepEqual(entries.map((entry) => entry.args), [
       'explore -g helloagents -- npm run cleanup-hosts -- --all',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 
   {
@@ -243,8 +319,9 @@ test('install.sh omits the mode for non-install actions so the CLI can reuse tra
     runInstallSh(pkgRoot, home, env)
     const entries = readLogEntries(logPath)
     assert.deepEqual(entries.map((entry) => entry.args), [
-      'install -g github:hellowind777/helloagents#beta',
+      'install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz',
       'explore -g helloagents -- npm run sync-hosts -- gemini',
     ])
+    assert.ok(entries.every((entry) => entry.deploy === '' && entry.target === '' && entry.mode === '' && entry.compact === ''))
   }
 })

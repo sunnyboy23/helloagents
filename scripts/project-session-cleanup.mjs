@@ -1,20 +1,19 @@
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
   ACTIVE_SESSION_FILE_NAME,
-  CAPSULE_FILE_NAME,
-  EVENTS_FILE_NAME,
-  PROJECT_ARTIFACTS_DIR_NAME,
   PROJECT_SESSIONS_DIR_NAME,
   getProjectActivationDir,
   getProjectRoot,
   readJsonFile,
   writeJsonFileAtomic,
 } from './runtime-scope.mjs'
+import { LONG_RUNNING_TTL_MS } from './runtime-ttl.mjs'
+import { looksLikeAutoCreatedState, readStateDocument } from './state-document.mjs'
 
 export const PROJECT_SESSION_CLEANUP_COOLDOWN_MS = 10 * 60 * 1000
-
+export const PROJECT_SESSION_MAX_AGE_MS = LONG_RUNNING_TTL_MS
 function removePath(filePath, result, bucket) {
   try {
     rmSync(filePath, { recursive: true, force: true })
@@ -33,32 +32,10 @@ function isDirectoryEmptyRecursive(dirPath) {
   })
 }
 
-function listFilesRecursive(dirPath) {
-  const entries = readdirSync(dirPath, { withFileTypes: true })
-  return entries.flatMap((entry) => {
-    const entryPath = join(dirPath, entry.name)
-    if (entry.isDirectory()) {
-      return listFilesRecursive(entryPath).map((child) => `${entry.name}/${child}`)
-    }
-    return entry.isFile() ? [entry.name] : []
-  })
-}
-
-function isRouteOnlySessionDir(sessionDir) {
-  if (existsSync(join(sessionDir, 'STATE.md'))) return false
-  const files = listFilesRecursive(sessionDir).map((file) => file.replace(/\\/g, '/'))
-  if (files.length === 0) return false
-  if (!files.includes(`${PROJECT_ARTIFACTS_DIR_NAME}/codex-native-stop.json`)) return false
-  return files.every((file) => [
-    CAPSULE_FILE_NAME,
-    EVENTS_FILE_NAME,
-    `${PROJECT_ARTIFACTS_DIR_NAME}/codex-native-stop.json`,
-  ].includes(file))
-}
-
-function shouldKeepSession(active, workspace, session) {
+function shouldKeepNestedSession(active, workspace, sessionName) {
   const activeWorkspace = active.workspace || active.branch || ''
-  return activeWorkspace === workspace && active.session === session
+  const activeSession = active.session || ''
+  return activeWorkspace === workspace && activeSession === sessionName
 }
 
 function readCleanupCheckedAt(active) {
@@ -75,7 +52,43 @@ function writeCleanupCheckpoint(activePath, active, now) {
   })
 }
 
-export function cleanupProjectSessions(cwd, { now = Date.now(), minIntervalMs = 0 } = {}) {
+function hasStateSnapshot(sessionDir) {
+  return existsSync(join(sessionDir, 'STATE.md'))
+}
+
+function isAutoCreatedSeedSession(sessionDir) {
+  const statePath = join(sessionDir, 'STATE.md')
+  if (!existsSync(statePath)) return false
+
+  const { body } = readStateDocument(statePath)
+  return looksLikeAutoCreatedState(body)
+}
+
+function readSessionStateMtimeMs(sessionDir) {
+  try {
+    return statSync(join(sessionDir, 'STATE.md')).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+function isStaleStateSession(sessionDir, now, maxAgeMs) {
+  const mtimeMs = readSessionStateMtimeMs(sessionDir)
+  return !Number.isFinite(mtimeMs) || mtimeMs <= 0 || (now - mtimeMs > maxAgeMs)
+}
+
+function isTransientSessionTemp(entryName = '') {
+  return /^\.[0-9]+-[0-9a-f-]+\.tmp$/i.test(entryName)
+}
+
+function cleanupTransientSessionTemps(sessionsDir, result) {
+  for (const entry of readdirSync(sessionsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !isTransientSessionTemp(entry.name)) continue
+    removePath(join(sessionsDir, entry.name), result, 'removedTempFiles')
+  }
+}
+
+export function cleanupProjectSessions(cwd, { now = Date.now(), minIntervalMs = 0, maxAgeMs = PROJECT_SESSION_MAX_AGE_MS } = {}) {
   const projectRoot = getProjectRoot(cwd)
   const activationDir = getProjectActivationDir(projectRoot)
   const sessionsDir = join(activationDir, PROJECT_SESSIONS_DIR_NAME)
@@ -84,7 +97,10 @@ export function cleanupProjectSessions(cwd, { now = Date.now(), minIntervalMs = 
   const result = {
     sessionsDir,
     removedEmptyDirs: [],
-    removedRouteOnlyDirs: [],
+    removedInactiveDirs: [],
+    removedNoStateDirs: [],
+    removedSeedDirs: [],
+    removedTempFiles: [],
     errors: [],
     skipped: false,
   }
@@ -98,27 +114,37 @@ export function cleanupProjectSessions(cwd, { now = Date.now(), minIntervalMs = 
     }
   }
 
+  try {
+    cleanupTransientSessionTemps(sessionsDir, result)
+  } catch (error) {
+    result.errors.push(`${sessionsDir}: ${error.message}`)
+  }
+
   for (const workspaceEntry of readdirSync(sessionsDir, { withFileTypes: true })) {
     if (!workspaceEntry.isDirectory()) continue
     const workspaceDir = join(sessionsDir, workspaceEntry.name)
-
-    for (const sessionEntry of readdirSync(workspaceDir, { withFileTypes: true })) {
-      if (!sessionEntry.isDirectory()) continue
-      const sessionDir = join(workspaceDir, sessionEntry.name)
-      if (shouldKeepSession(active, workspaceEntry.name, sessionEntry.name)) continue
-
-      try {
+    try {
+      const nestedEntries = readdirSync(workspaceDir, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+      for (const nestedEntry of nestedEntries) {
+        const sessionDir = join(workspaceDir, nestedEntry.name)
+        if (shouldKeepNestedSession(active, workspaceEntry.name, nestedEntry.name)) continue
         if (isDirectoryEmptyRecursive(sessionDir)) {
           removePath(sessionDir, result, 'removedEmptyDirs')
-        } else if (isRouteOnlySessionDir(sessionDir)) {
-          removePath(sessionDir, result, 'removedRouteOnlyDirs')
+          continue
         }
-      } catch (error) {
-        result.errors.push(`${sessionDir}: ${error.message}`)
+        if (!hasStateSnapshot(sessionDir)) {
+          removePath(sessionDir, result, 'removedNoStateDirs')
+          continue
+        }
+        if (isAutoCreatedSeedSession(sessionDir)) {
+          removePath(sessionDir, result, 'removedSeedDirs')
+          continue
+        }
+        if (isStaleStateSession(sessionDir, now, maxAgeMs)) {
+          removePath(sessionDir, result, 'removedInactiveDirs')
+        }
       }
-    }
 
-    try {
       if (isDirectoryEmptyRecursive(workspaceDir)) {
         removePath(workspaceDir, result, 'removedEmptyDirs')
       }

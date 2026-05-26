@@ -13,7 +13,13 @@ import {
   readText,
   writeText,
 } from './helpers/test-env.mjs'
-import { getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
+import {
+  getCodexNotifyStatePath,
+  getSessionStatePath,
+  parseStdoutJson,
+  readCodexNotifySlot,
+  writeSettings,
+} from './helpers/runtime-test-helpers.mjs'
 
 test('codex notify gates only main complete turns from turn-state', () => {
   const { root: pkgRoot } = createPackageFixture()
@@ -65,7 +71,7 @@ test('codex notify gates only main complete turns from turn-state', () => {
       cwd: project,
       role: 'subagent',
       kind: 'complete',
-      phase: 'verify',
+      phase: 'qa',
     }),
   })
   parseStdoutJson(result)
@@ -148,6 +154,128 @@ test('codex notify gates only main complete turns from turn-state', () => {
     env,
   })
   assert.equal(result.stdout, '')
+})
+
+test('managed codex notify ignores clientless delegated completion events', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const env = buildHomeEnv(home)
+  const project = createTempDir('helloagents-codex-subagent-notify-')
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home, { output_format: true })
+  writeJson(join(home, '.codex', 'hooks.json'), {
+    hooks: {
+      Stop: [
+        {
+          matcher: '',
+          hooks: [
+            {
+              type: 'command',
+              command: 'helloagents-js notify stop --codex',
+              timeout: 120,
+            },
+          ],
+        },
+      ],
+    },
+  })
+
+  const result = runNode(notifyScript, ['codex-notify', JSON.stringify({
+    type: 'agent-turn-complete',
+    cwd: project,
+    sessionId: 'child001',
+    turnId: 'turn-child-1',
+    inputMessages: ['这是一个局部子任务。'],
+    lastAssistantMessage: 'OK',
+  })], {
+    cwd: project,
+    env,
+  })
+
+  assert.equal(result.stdout, '')
+  assert.equal(
+    existsSync(getCodexNotifyStatePath(home)),
+    false,
+  )
+})
+
+test('managed codex notify still records main completion evidence for client-tagged events', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const env = buildHomeEnv(home)
+  const project = createTempDir('helloagents-codex-main-notify-')
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home, { output_format: true })
+  writeText(join(project, '.helloagents', '.keep'), '')
+  writeJson(join(home, '.codex', 'hooks.json'), {
+    hooks: {
+      Stop: [
+        {
+          matcher: '',
+          hooks: [
+            {
+              type: 'command',
+              command: 'helloagents-js notify stop --codex',
+              timeout: 120,
+            },
+          ],
+        },
+      ],
+    },
+  })
+
+  const result = runNode(notifyScript, ['codex-notify', JSON.stringify({
+    type: 'agent-turn-complete',
+    client: 'codex_exec',
+    cwd: project,
+    sessionId: 'main001',
+    turnId: 'turn-main-1',
+    inputMessages: ['主任务提示'],
+    lastAssistantMessage: 'DONE',
+  })], {
+    cwd: project,
+    env,
+  })
+
+  assert.equal(result.stdout, '')
+  assert.equal(
+    Boolean(readCodexNotifySlot(home, 'quickNotify')),
+    true,
+  )
+})
+
+test('codex stop blocks HelloAGENTS wrapper for explicit subagent payload', () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+  const env = buildHomeEnv(home)
+  const project = createTempDir('helloagents-codex-subagent-stop-')
+  const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
+
+  writeSettings(home)
+  writeJson(join(project, 'package.json'), {
+    name: 'subagent-stop-project',
+    scripts: {
+      lint: 'node -e "process.exit(0)"',
+    },
+  })
+
+  const result = runNode(notifyScript, ['stop', '--codex'], {
+    cwd: project,
+    env,
+    input: JSON.stringify({
+      cwd: project,
+      sessionId: 'sub-stop-1',
+      isSubagent: true,
+      parentAgentId: 'parent-1',
+      lastAssistantMessage: '✅【HelloAGENTS】- 审查完成\n\n局部结果。\n\n🔄 下一步: 等待主代理汇总',
+    }),
+  })
+
+  const payload = parseStdoutJson(result)
+  assert.equal(payload.decision, 'block')
+  assert.match(payload.reason, /子代理输出不应使用 HelloAGENTS 外层格式/)
 })
 
 test('fullstack closeout blocks completion without task store evidence', () => {
@@ -321,7 +449,7 @@ test('stop allows structured waiting turn-state and clears it', () => {
   assert.equal(payload.state, null)
 })
 
-test('ordinary complete turns skip automatic Ralph Loop verification', () => {
+test('ordinary complete turns skip automatic QA gate verification', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
   const env = buildHomeEnv(home)
@@ -363,17 +491,17 @@ test('ordinary complete turns skip automatic Ralph Loop verification', () => {
   assert.equal(payload.decision, undefined)
 })
 
-test('explicit verify route still runs Ralph Loop verification', () => {
+test('explicit qa route still runs QA gate verification', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
   const env = buildHomeEnv(home)
-  const project = createTempDir('helloagents-turn-state-verify-route-')
+  const project = createTempDir('helloagents-turn-state-qa-route-')
   const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
   const turnStateScript = join(pkgRoot, 'scripts', 'turn-state.mjs')
 
   writeSettings(home, { ralph_loop_enabled: true })
   writeJson(join(project, 'package.json'), {
-    name: 'verify-route-project',
+    name: 'qa-route-project',
     scripts: {
       test: 'node -e "process.exit(1)"',
     },
@@ -384,7 +512,7 @@ test('explicit verify route still runs Ralph Loop verification', () => {
     env,
     input: JSON.stringify({
       cwd: project,
-      prompt: '~verify run checks',
+      prompt: '~qa run checks',
     }),
   })
   parseStdoutJson(result)
@@ -396,7 +524,7 @@ test('explicit verify route still runs Ralph Loop verification', () => {
       cwd: project,
       role: 'main',
       kind: 'complete',
-      phase: 'verify',
+      phase: 'qa',
     }),
   })
   parseStdoutJson(result)
@@ -406,13 +534,13 @@ test('explicit verify route still runs Ralph Loop verification', () => {
     env,
     input: JSON.stringify({
       cwd: project,
-      lastAssistantMessage: '验证完成。',
+      lastAssistantMessage: '质量闭环已完成。',
     }),
   })
 
   const payload = parseStdoutJson(result)
   assert.equal(payload.decision, 'block')
-  assert.match(payload.reason, /Ralph Loop/)
+  assert.match(payload.reason, /QA Gate/)
   assert.match(payload.reason, /npm run test/)
 })
 
@@ -438,7 +566,7 @@ test('turn-state rejects waiting without blocker details', () => {
   assert.match(`${result.stderr}${result.stdout}`, /requires reasonCategory and reason/)
 })
 
-test('turn-state writes pure cwd into the session capsule', () => {
+test('turn-state writes pure cwd into the session state file', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
   const env = buildHomeEnv(home)
@@ -454,11 +582,11 @@ test('turn-state writes pure cwd into the session capsule', () => {
       cwd: project,
       role: 'main',
       kind: 'complete',
-      phase: 'verify',
+      phase: 'qa',
     }),
   })
   let payload = parseStdoutJson(result)
-  assert.match(payload.path, /[\\/]\.helloagents[\\/]sessions[\\/]workspace[\\/]default[\\/]capsule\.json$/)
+  assert.match(payload.path, /[\\/]\.helloagents[\\/]sessions[\\/]workspace[\\/]default[\\/]STATE\.md$/)
   assert.equal(payload.payload.cwd, project)
   assert.equal(payload.payload.key.endsWith('::workspace::default'), true)
 
@@ -586,7 +714,7 @@ test('stop blocks explicit auto when turn-state is missing', () => {
 
   const payload = parseStdoutJson(result)
   assert.equal(payload.decision, 'block')
-  assert.match(payload.reason, /显式 ~auto 本轮不应直接停下/)
+  assert.match(payload.reason, /显式 ~auto 当前对话不应直接停下/)
   assert.match(payload.reason, /缺少主代理 turn-state/)
 })
 
@@ -621,7 +749,7 @@ test('codex notify blocks explicit auto when turn-state is missing', () => {
 
   const payload = parseStdoutJson(result)
   assert.equal(payload.decision, 'block')
-  assert.match(payload.reason, /显式 ~auto 本轮不应直接停下/)
+  assert.match(payload.reason, /显式 ~auto 当前对话不应直接停下/)
   assert.match(payload.reason, /缺少主代理 turn-state/)
 })
 

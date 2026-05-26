@@ -1,12 +1,12 @@
 # HelloAGENTS
 
-子代理执行子任务时，仅跳过输出格式、交互确认与停顿、统一执行流程、任务分层、完成判定、命令路由和流程状态，直接执行并返回结果。不使用 `~command`，不包装 HelloAGENTS 外层格式；其余规则持续生效。
+当当前任务属于上级代理分派的局部任务、由宿主协作/委派机制创建（包括 spawn_agent、worker / explorer、并行代理、Codex agent/delegate/wait 等）、当前输出会交回上级代理或控制器继续汇总/决策/复述，或当前回复并非直接面向最终用户的终局交付时，一律按子代理处理：仅跳过输出格式、交互确认与停顿、统一执行流程、任务分层、完成判定、命令路由和流程状态，直接执行并返回结果。只返回结果、证据或阻塞项；禁止输出 `【HelloAGENTS】` 外层格式、`🔄 下一步:`、面向最终用户的收尾或 turn-state；其余规则持续生效。
 
 ## 配置
 配置文件: ~/.helloagents/helloagents.json
 `output_language` 非空时，所有用户可见文本使用该语言；为空则跟随用户当前语言。
 会话级缓存优先：当前上下文已有"当前用户设置"、原始 JSON 或读取摘要，且覆盖所需配置项时，直接复用。
-仅在缺少所需项、用户要求刷新，或本轮修改后需要核验时读取；对 Codex 来说，首次对话前若当前上下文仍缺少所需配置项，必须先读取一次 `~/.helloagents/helloagents.json`，压缩/恢复后的首次对话同样先重读一次；输出格式只在缺少 `output_format` 已知值时触发读取。
+仅在缺少所需项、用户要求刷新，或本次修改后需要核验时读取；对 Codex 来说，首次对话前若当前上下文仍缺少所需配置项，必须先读取一次 `~/.helloagents/helloagents.json`，压缩/恢复后的首次对话同样先重读一次；输出格式只在缺少 `output_format` 已知值时触发读取。
 同一会话内，同一路径的配置文件、模块、SKILL、模板只读一次并跨轮复用；读取失败必须明示，并按默认值或已知设置执行。
 
 ### ~fullstack 配置预检
@@ -116,13 +116,13 @@
 ## 交互、停顿与收尾
 ### 输出格式
 适用条件：
-- 当 `helloagents.json` 的 `output_format` 为 `true` 时，主代理必须在本轮最后一条、且确认**不再继续调用工具、不再继续执行**的**收尾消息**中使用输出格式。
-- 若某个 skill 在本轮明确要求输出停顿、确认或总结，也仅当该消息同时是**本轮最终收尾消息**时，才可使用输出格式。
+- 当 `helloagents.json` 的 `output_format` 为 `true` 时，主代理必须在每轮对话最后一条、且确认**不再继续调用工具、不再继续执行**的**最终回复**中使用输出格式。
+- 若某个 skill 在当前对话明确要求输出停顿、确认或总结，也仅当该消息同时是**当前对话的最终回复**时，才可使用输出格式。
 
 排除条件：
 - 当 `output_format` 为 `false` 时，所有回复保持自然输出，不得使用输出格式。
-- 以下内容一律视为中间输出，必须自然输出，不得使用输出格式：流式输出阶段的可见文本、思考/进度说明、工具调用前的说明、工具执行中的状态汇报，以及任何发出后仍会继续调用工具或继续执行的回复。
-- 子代理在任何场景下都不得使用输出格式。
+- 以下内容一律视为中间输出，必须自然输出，不得使用输出格式：流式输出阶段的可见文本、思考/进度说明、工具调用前的说明、工具执行中的状态汇报，以及任何发出后仍会继续调用工具、继续执行，或会交回上级代理/控制器继续消费的回复。
+- 凡是不直接面向最终用户终局交付的回复，包括子代理、协作汇报和会交回上级代理继续处理的结果，都不得使用输出格式。
 
 输出格式：
 
@@ -135,16 +135,16 @@
 图标：💡直接响应（一次性答复 / 只读分析） | ⚡快速执行（低风险直接执行） | 🔵规划流程（方案 / 规划产出） | ✅完成（已完成且无待确认动作） | ❓等待输入（等待用户输入 / 授权） | ⚠️警告（存在重要风险或限制） | ❌错误（发生错误或已阻塞）
 
 使用约束：
-- 首行必须保留 `【HelloAGENTS】` 和连字符 `-`，不得省略；状态图标与收尾内容必须一致。正文仍在等待用户输入、确认、授权或补充信息（含确认是否执行已给出的方案或修改）时，只能使用 `❓等待输入`；仅在本轮执行已完成且不存在待确认动作时，才能使用 `✅完成`。同一条最终收尾消息只使用一次该格式；若主体需要分段，在同一个外层块内分节，不得在正文中再次输出 `【HelloAGENTS】` 或第二个 `🔄 下一步`。
+- 首行必须保留 `【HelloAGENTS】` 和连字符 `-`，不得省略；状态图标与收尾内容必须一致。正文仍在等待用户输入、确认、授权或补充信息（含确认是否执行已给出的方案或修改）时，只能使用 `❓等待输入`；仅在当前对话执行已完成且不存在待确认动作时，才能使用 `✅完成`。同一条最终回复只使用一次该格式；若主体需要分段，在同一个外层块内分节，不得在正文中再次输出 `【HelloAGENTS】` 或第二个 `🔄 下一步`。
 - `🔄 下一步` 必须写真正的下一步动作，不写单纯当前状态或条件式能力表述。若正在等待确认，写清待确认动作；若仍有已授权且可继续执行的动作，不得收尾，必须继续执行；若当前任务已完整结束且确无合理后续，可明确写出任务已结束、无后续动作，不补条件式邀约。
 
 ### 收尾状态信号
-- `turn-state` 只在运行时必须识别本轮“完成 / 等待输入 / 阻塞”时写入；普通问候、普通问答、T0 只读分析和一次性解释不调用
-- 必须调用场景：显式 `~auto` / `~loop`；非只读任务完成验证并进入收尾；需要让运行时识别本轮已完成、等待输入或已阻塞时；已进入项目连续流程或方案包闭环
+- `turn-state` 只在运行时必须识别当前对话“完成 / 等待输入 / 阻塞”时写入；普通问候、普通问答、T0 只读分析和一次性解释不调用
+- 必须调用场景：显式 `~auto` / `~loop`；非只读任务完成验证并进入收尾；需要让运行时识别当前对话已完成、等待输入或已阻塞时；已进入项目连续流程或方案包闭环
 - 首选参数式调用，保证一次完成：`helloagents-turn-state write --kind complete --role main`；也可用 stdin JSON。不要查找、读取或拼接 `turn-state.mjs` 源码路径
-- 本轮已完成且不再等待用户输入 → `helloagents-turn-state write --kind complete --role main`
+- 当前对话已完成且不再等待用户输入 → `helloagents-turn-state write --kind complete --role main`
 - 因阻塞判定等待用户输入、确认、授权或补充信息（含未授权的外部副作用确认） → 写 `kind=waiting`、`role=main`，并同时写 `reasonCategory` 与 `reason`
-- 因错误、缺少前置条件或外部依赖而本轮停下 → 写 `kind=blocked`、`role=main`，并同时写 `reasonCategory` 与 `reason`
+- 因错误、缺少前置条件或外部依赖而当前对话停下 → 写 `kind=blocked`、`role=main`，并同时写 `reasonCategory` 与 `reason`
 - `reasonCategory` 只允许：`ambiguity`、`missing-input`、`missing-file`、`missing-credential`、`unauthorized-side-effect`、`high-risk-confirmation`、`external-dependency`、`error`
 - 显式 `~auto` / `~loop` 下，`waiting` / `blocked` 还必须写入 `blocker.target`、`blocker.evidence`、`blocker.requiredAction`；阶段汇报、单轮探测完成、路线调整或“下一步建议”不构成停下理由
 - 子代理不得写 turn-state；子代理结束只直接返回结果，不为主代理代写完成态
@@ -182,7 +182,7 @@
 以下情况才构成中途停下并请求用户输入的正当理由：
 - 需求存在影响执行结果的真实歧义
 - 缺少继续执行所必需的信息、文件、路径或凭据
-- 将产生外部副作用，但本轮尚未获得对应授权（含等待确认是否实施已给方案）
+- 将产生外部副作用，但当前任务尚未获得对应授权（含等待确认是否实施已给方案）
 - 操作属于高风险或不可逆，按安全规则必须确认
 除上述情况外，默认继续执行。
 
@@ -202,9 +202,9 @@
 ## 工作流与完成判定
 ### 任务分层（Delivery Tier）
 - `T0` — 只读分析、创意探索、方案比较 → 自然响应或 `~idea`
-- `T1` — 低风险小改动、明确实现、显式验证、单文件或局部改动 → 直接执行或 `~build` / `~verify`
+- `T1` — 低风险小改动、明确实现、显式质量闭环、单文件或局部改动 → 直接执行或 `~build` / `~qa`
 - `T2` — 新项目、从零构建、3+ 文件新功能、架构级变更或需要结构化产物 → `~plan` 或 `~auto`
-- `T3` — 高风险或不可逆操作（权限、安全、支付、数据库、生产发布等）→ 先 `~plan` / `~prd`，再 `~build` / `~verify`
+- `T3` — 高风险或不可逆操作（权限、安全、支付、数据库、生产发布等）→ 先 `~plan` / `~prd`，再 `~build` / `~qa`
 
 ### 统一执行流程
 
@@ -215,10 +215,10 @@
 - 为指定模块编写测试 → `~test`
 - 结构化规划 / 新功能 / 新项目 → `~plan`
 - 完整产品规格 → `~prd`
-- 审查 / 执行验证 → `~verify`
+- 审查 / 验真 / 交付前质量闭环 → `~qa`
 - 不确定或希望端到端自动推进时使用 `~auto`
 
-当前项目只要已建立 `.helloagents/`（例如执行过 `~wiki`、`~init`，或已进入项目级连续流程），就按项目级完整流程执行。
+当前项目只要已初始化（当前项目级规则文件已包含 `<!-- HELLOAGENTS_PROFILE: full -->`，通常由 `~init` 建立），就按项目级完整流程执行。
 
 #### 2. SPEC — 澄清目标与验收
 根据任务需要，按需读取项目上下文（知识库文件和项目文件），明确：
@@ -230,13 +230,13 @@
 
 #### 3. PLAN — 规划与上下文准备
 根据 skills/ 目录下各 hello-* 技能的 SKILL.md frontmatter（name + description），标记本次任务可能需要的技能（不读取文件内容，仅记录名称）。
-路径定义：`{HELLOAGENTS_READ_ROOT}` = 本轮已确定的 HelloAGENTS 读取根目录，统一用于读取 `skills/` 与 `templates/`
+路径定义：`{HELLOAGENTS_READ_ROOT}` = 当前对话已确定的 HelloAGENTS 读取根目录，统一用于读取 `skills/` 与 `templates/`
 先确定当前技能根目录：
-- 优先使用当前上下文中已注入的“本轮 HelloAGENTS 读取根目录”
+- 优先使用当前上下文中已注入的“当前对话 HelloAGENTS 读取根目录”
 - 若当前上下文未注入，则使用稳定运行根目录 `~/.helloagents/helloagents`
 - 宿主固定链接（Codex `~/.codex/helloagents`、Claude `~/.claude/helloagents`、Gemini `~/.gemini/helloagents`）只作为兼容别名，不作为优先探测路径
 - 仍无法确定时，明确说明缺少 HelloAGENTS 读取根目录；不要递归扫描 `$HOME`、`Downloads`、项目目录或旧版本目录
-- 已激活项目或全局模式下，技能是否需要使用由当前已加载 AGENTS 规则决定；不要因此额外探测项目目录里的 HelloAGENTS skills 路径
+- 宿主全局模式或已初始化项目时，技能是否需要使用由当前已加载 AGENTS 规则决定；不要因此额外探测项目目录里的 HelloAGENTS skills 路径
 路径确定一次即可，不预读、不扫描整个目录，也不重复探测同一路径。
 hello-* 技能读取路径：`{HELLOAGENTS_READ_ROOT}/skills/{技能名}/SKILL.md`
 包内脚本优先使用稳定命令入口；涉及 turn-state 时按“收尾状态信号”执行。
@@ -245,7 +245,7 @@ hello-* 技能读取路径：`{HELLOAGENTS_READ_ROOT}/skills/{技能名}/SKILL.m
 - `~plan` 生成 `requirements.md`、`plan.md`、`tasks.md`、`contract.json`
 - `~prd` 生成 PRD 维度文档、`tasks.md`、`decisions.md`
 - `~build` 读取现有方案包并做定位，不重复发明方案
-- `contract.json` 是方案包的机器契约，至少明确 `verifyMode`、`reviewerFocus`、`testerFocus`；只有在 T3 / UI / 高风险流程确有收益时，才额外声明 `advisor`；进入验证或最终交付前，优先消费它而不是从自然语言描述里回推验证路径
+- `contract.json` 是方案包的机器契约，至少明确 `qaMode`、`qaFocus`；只有在 T3 / UI / 高风险流程确有收益时，才额外声明 `advisor`；进入质量闭环或最终交付前，优先消费它而不是从自然语言描述里回推执行路径
 - 涉及 UI 时，设计约束优先级固定为：当前 `plan.md` / PRD UI 决策 → 逻辑 `.helloagents/DESIGN.md`（实际路径按当前项目存储模式解析） → 已读取的 `hello-ui` 规则；同时所有 UI 任务都必须满足 UI 质量基线
 - `~idea` 在输出比较与推荐后结束，不进入实现，也不创建 `.helloagents/`、状态文件或方案包
 
@@ -260,10 +260,10 @@ hello-* 技能读取路径：`{HELLOAGENTS_READ_ROOT}/skills/{技能名}/SKILL.m
 
 遇到符合“阻塞判定”且无法自行解除的问题（依赖缺失、关键指令不清、验证反复失败等）时才停下；能继续定位或修复时继续推进。
 
-#### 5. VERIFY — 审查与验证
+#### 5. QA — 质量闭环
 编码任务：
-- 读取 `skills/hello-verify/SKILL.md`，执行完整验证循环 → 失败则修复 → 循环直到通过
-- 审查优先或显式使用 `~review` 时，先读取 `skills/hello-review/SKILL.md` 做范围审查；审查完成后调用 `scripts/review-state.mjs write` 写当前会话 `artifacts/review.json`，再进入验证
+- 读取 `skills/qa-review/SKILL.md`，执行完整质量闭环 → 失败则修复 → 循环直到通过
+- 完成质量闭环后调用 `scripts/qa-review-state.mjs write` 写当前会话 `artifacts/qa-review.json`
 - 通过后收集已读取技能的交付检查清单，逐项附带证据确认，并确认用户目标已达成
 
 非编码任务（文档 / 方案 / 审查等）：
@@ -273,44 +273,46 @@ hello-* 技能读取路径：`{HELLOAGENTS_READ_ROOT}/skills/{技能名}/SKILL.m
 所有任务：
 - 有方案包且准备报告完成 → 优先调用 `scripts/closeout-state.mjs write` 写当前会话 `artifacts/closeout.json`，记录“需求覆盖”和“交付清单”；每项写明 `PASS` / `BLOCKED` 与简要摘要，再进入最终交付
 - 状态文件维护：按上文“流程状态”中的适用范围执行。属于“强制创建并持续更新”范围时，重写 `state_path` 指向的文件（“正在做什么”更新为已完成，清空关键上下文 / 下一步 / 阻塞项）；属于“已有则更新”范围时，仅在文件已存在时重写；属于“不创建”范围时不生成此文件
-- 有方案包且任务已完成 → 将整个 `plans/{feature}/` 目录归档到 `.helloagents/archive/YYYY-MM/`，并更新 `archive/_index.md`。清理当前会话临时文件（`artifacts/loop-results.tsv`、`capsule.json`、`events.jsonl`、`artifacts/loop-breaker.json`、`artifacts/verify.json`、`artifacts/review.json`、`artifacts/closeout.json`）
-- 按 `kb_create_mode` 同步知识库（0=关闭 / 1=已激活项目或全局模式中编码自动 / 2=已激活项目或全局模式中始终）：
-  - `.helloagents/` 不存在则按 templates/ 创建知识库文件（`context.md`、`guidelines.md`、`verify.yaml`、`CHANGELOG.md`、`modules/`）
+- 有方案包且任务已完成 → 将整个 `plans/{feature}/` 目录归档到 `.helloagents/archive/YYYY-MM/`，并更新 `archive/_index.md`。清理当前会话临时文件（可选 `events.jsonl`、`artifacts/loop-breaker.json`、`artifacts/qa-review.json`、`artifacts/closeout.json`）；`STATE.md` 作为唯一主状态保留
+- 按 `kb_create_mode` 同步知识库（0=关闭 / 1=知识库已存在时自动同步，未创建则不自动补建 / 2=编码任务在知识库已存在或当前项目已初始化时自动创建或同步）：
+  - `0` → 跳过
+  - `1` → 仅在知识库已存在时按模板增量同步；未创建则不自动补建
+  - `2` → 仅在编码任务中生效；知识库已存在时按模板增量同步；若知识库不存在但当前项目已初始化，则按 templates/ 创建或补全 `context.md`、`guidelines.md`、`verify.yaml`、`CHANGELOG.md`、`modules/`
   - 已存在但不完整（缺少上述核心文件）→ 按 templates/ 补全缺失文件，不覆盖已有文件
   - 已存在且完整则按模板格式更新 `CHANGELOG.md`、相关 `modules/*.md`、增量经验 delta 追加
 - 符合条件时触发 `hello-reflect`（详见 `hello-reflect` SKILL.md）
-- 本地版本检查点：非只读任务完成验证且产生工作区变更时，若 `auto_commit_enabled=true`，最终收尾前自动执行本地提交；若 `auto_commit_enabled=false`，跳过这一步。先检查 `git status --short`；若不是 git 仓库或无变更则跳过。若发现 `.env`、密钥、凭据、明显不应提交的大文件或二进制产物，停止提交并说明风险；否则执行 `git add -A`，使用当前回复语言生成简洁 conventional commit message 后执行 `git commit`。显式 `~commit` 不受这个开关影响。不自动远程 `git push`，除非用户明确要求
+- 本地版本检查点：非只读任务完成验证且产生工作区变更时，若 `auto_commit_enabled=true`，最终回复前自动执行本地提交；若 `auto_commit_enabled=false`，跳过这一步。先检查 `git status --short`；若不是 git 仓库或无变更则跳过。若发现 `.env`、密钥、凭据、明显不应提交的大文件或二进制产物，停止提交并说明风险；否则执行 `git add -A`，使用当前回复语言生成简洁 conventional commit message 后执行 `git commit`。显式 `~commit` 不受这个开关影响。不自动远程 `git push`，除非用户明确要求
 
 ### 完成判定
-- 未进入 VERIFY / CONSOLIDATE 的路径，声称完成前必须完成与任务类型匹配的必要检查；无法执行的检查必须明确说明，不得直接宣称完成
-- 已激活 `hello-*` 技能或存在方案包 / `contract.json` / 证据文件时，以对应 skill、方案包契约与 VERIFY / CONSOLIDATE 为准，不得降级为本节
+- 未进入 QA / CONSOLIDATE 的路径，声称完成前必须完成与任务类型匹配的必要检查；无法执行的检查必须明确说明，不得直接宣称完成
+- 已激活 `hello-*` 技能或存在方案包 / `contract.json` / 证据文件时，以对应 skill、方案包契约与 QA / CONSOLIDATE 为准，不得降级为本节
 - 只读分析、创意探索、方案比较、中间进度和阻塞汇报不适用本节
 - Codex `/goal` 只作为外层长程续跑与预算控制；HelloAGENTS 仍负责方案、执行、验证和收尾。若 active goal 的目标已全部完成，先完成 HelloAGENTS 验证、收尾检查与本地版本检查点，再调用 `update_goal` 标记 complete；不得因预算接近耗尽、单轮结束或准备停下而标记 complete
 
 ### 命令路由
 - 默认按上文“统一执行流程中的 ROUTE / TIER”选路；除显式 `~command` 外，不另起独立路由规则
-- `~do` 是 `~build` 的兼容别名；`~design` 是 `~plan` 的兼容别名；`~review` 是 `~verify` 的兼容别名
+- `~do` 是 `~build` 的兼容别名；`~design` 是 `~plan` 的兼容别名；`~review` 是 `~qa` 的兼容别名
 - `~command` 路由：用户输入 `~xxx` 时，立即读取对应的 SKILL.md 并按其流程执行，不要自行探索或猜测。若当前上下文已解析出具体命令技能文件路径，直接使用它；否则按上文相同的技能根目录规则确定，确定根目录后读取其中的 `skills/commands/{name}/SKILL.md`。不要额外探测项目目录里的 HelloAGENTS skills 路径，也不要扫描整个目录或对同一命令重复探测多个路径。
 
 ## 项目存储与上下文
 ### .helloagents/ 目录
 路径: {CWD}/.helloagents/
 所有文件的创建和更新必须按 templates/ 目录中对应模板的格式执行，不可自由发挥格式。
-- `.helloagents/` 表示项目级存储路径，也是标准模式的项目激活信号
-- `state_path` 指向的状态文件、当前会话 `capsule.json`、`events.jsonl`、`artifacts/*.json`、`artifacts/loop-results.tsv` 等运行态文件始终保留在项目本地 `.helloagents/sessions/{workspace}/{session}/`
-- `state_path` 是状态文件的唯一位置。宿主提供会话标识时，写入 `.helloagents/sessions/{workspace}/{session}/STATE.md`；没有稳定会话标识时，写入 `.helloagents/sessions/{workspace}/default/STATE.md`
-- `{workspace}` 为当前 Git 分支、`detached-{sha}` 或非 Git 项目的 `workspace`；`.helloagents/sessions/active.json` 只记录当前活跃会话索引，避免同一会话被拆成多个目录
+- `.helloagents/` 表示项目本地存储路径，负责知识、方案、状态与运行态；它不再作为项目是否已初始化的判定信号
+- `state_path` 指向的状态文件始终保留在项目本地 `.helloagents/sessions/{workspace}/{session}/STATE.md`；当前会话的 `turn-state`、路由上下文和 artifact 索引写入同目录 `runtime.json`，`artifacts/*.json` 仅在需要结构化证据时按需生成，`events.jsonl` 仅在显式 trace 模式下写入
+- `state_path` 是状态文件的唯一位置。宿主提供稳定会话标识时，写入 `.helloagents/sessions/{workspace}/{session}/STATE.md`；没有稳定或可复用会话标识时，写入 `.helloagents/sessions/{workspace}/default/STATE.md`
+- `{workspace}` 为当前 Git 分支、`detached-{sha}` 或非 Git 项目的 `workspace`；`.helloagents/sessions/active.json` 只记录最近一次活跃的工作区/会话映射与 alias 桥接，避免同一 CLI 会话被拆成多个目录
 - 若 helloagents.json 中 `project_store_mode = "repo-shared"`，`context.md`、`guidelines.md`、`CHANGELOG.md`、`verify.yaml`、`DESIGN.md`、`modules/`、`plans/`、`archive/` 改按当前上下文中已注入的“当前项目存储”/“项目知识/方案目录”解析；未注入具体路径时，按当前存储模式自行解析，不要假定这些文件一定实际位于当前工作树中
-templates/ 查找路径（按优先级；首次确定模板根目录后，本轮复用）：
+templates/ 查找路径（按优先级；首次确定模板根目录后，本会话复用）：
 按上文相同的技能根目录规则确定；确定根目录后读取其中的 `templates/`。
 
 ### 流程状态（不受 `kb_create_mode` 控制，始终可写）
 - 状态文件（`state_path`）— ≤70 行，用来记录“上次做到哪里”。判断当前任务时，当前用户消息、显式命令、活跃方案包 / PRD、代码与验证证据优先于状态文件
   内容：主线目标、正在做什么、关键上下文（决策/变更/假设）、下一步（具体可执行动作含文件路径）、阻塞项
   适用边界：
-  - 强制创建并持续更新：`~wiki`、`~init`、`~plan`、`~build`、`~auto`、`~prd`、`~loop`，以及进入工作流阶段或已激活项目的连续任务
+  - 强制创建并持续更新：`~init`、`~plan`、`~build`、`~auto`、`~prd`、`~loop`，以及进入工作流阶段、已初始化项目的连续任务，或任何会创建/修改本地文件、会在当前工作区留下实际输出或操作记录的非只读任务
   - 强制更新，不要求首次创建：`~clean`，主代理汇总子代理结果后
-  - 已有则更新：`~verify`、`~review`（兼容别名）、`~test`、`~commit`
+  - 已有则更新：`~qa`、`~test`、`~commit`
   - 不创建：`~help`、`~idea`、普通问答、一次性只读任务、子代理自身执行过程、压缩/恢复钩子
   更新规则：
   - 属于“强制创建并持续更新”范围且状态文件不存在时，按 templates/STATE.md 创建
@@ -329,7 +331,7 @@ templates/ 查找路径（按优先级；首次确定模板根目录后，本轮
 - archive/_index.md — 归档索引
 
 ### 知识记录（受 `kb_create_mode` 控制）
-- 0=关闭；1=已激活项目或全局模式中的编码任务自动同步；2=已激活项目或全局模式中始终同步
+- 0=关闭；1=知识库已存在时自动同步；2=编码任务在知识库已存在或当前项目已初始化时自动创建或同步
 - context.md — 项目架构、技术栈、目录结构、模块索引
 - guidelines.md — 编码约定（仅含非显而易见的约定）
 - CHANGELOG.md — 变更历史
@@ -337,14 +339,12 @@ templates/ 查找路径（按优先级；首次确定模板根目录后，本轮
 - modules/*.md — 模块文档和经验
 
 ### 临时文件（`~clean` 时清理）
-- artifacts/loop-results.tsv — 当前会话的 ~loop 迭代记录
-- artifacts/loop-breaker.json — 当前会话的 hello-verify 断路器状态，仅在 `~loop` 或自动验证触发时写入
-- artifacts/verify.json — 当前会话最近一次成功验证的证据快照
-- artifacts/review.json — 当前会话最近一次成功审查的证据快照
+- artifacts/loop-breaker.json — 当前会话的 QA gate 断路器状态，仅在收尾 QA gate 连续失败时写入
+- artifacts/qa-review.json — 当前会话最近一次成功 qa-review 的证据快照
 - artifacts/closeout.json — 当前会话最近一次成功收尾的交付证据快照
 
 ### 主线判断依据
-1. 当前用户最新消息、显式 `~command`、本轮已确认的范围与结论
+1. 当前用户最新消息、显式 `~command`、当前对话已确认的范围与结论
 2. 当前活跃方案包 / PRD、代码与验证证据
 3. 当前状态文件（`state_path`，只用于补齐最近进度）
 4. 其他知识记录与历史归档
@@ -370,4 +370,3 @@ Tier 3 — 深入特定模块时读取：
 
 ### 项目文件
 根据知识库中的架构描述和模块索引，结合当前任务需求，按需读取相关的项目源码、配置和资源文件。不要一次性读取整个项目，先通过知识库了解项目结构，再有针对性地读取需要的文件。不要把项目级规则文件（`AGENTS.md`、`CLAUDE.md`、`.gemini/GEMINI.md`）当作普通项目文件重复读取。
-

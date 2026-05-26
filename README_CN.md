@@ -8,7 +8,7 @@
 
 **面向 AI 编码 CLI 的工作流层：技能、知识库、交付检查、更安全的配置写入，以及可恢复的执行流程。**
 
-[![Version](https://img.shields.io/badge/version-3.0.29-orange.svg)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.0.39-orange.svg)](./package.json)
 [![npm](https://img.shields.io/npm/v/helloagents.svg)](https://www.npmjs.com/package/helloagents)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](./package.json)
 [![Skills](https://img.shields.io/badge/skills-14-6366f1.svg)](./skills)
@@ -78,9 +78,9 @@ HelloAGENTS 叠加在 Claude Code、Gemini CLI 和 Codex CLI 之上，帮助模�
 
 ## 核心功能
 
-### 1）14 个按任务使用的质量技能
+### 1）14 个内置工作流技能
 
-HelloAGENTS 内置 14 个 `hello-*` 技能。技能只在当前阶段需要时读取，因此简单任务不会被额外流程拖慢，复杂任务则会得到更完整的检查。
+HelloAGENTS 内置 14 个技能。技能只在当前阶段需要时读取，因此简单任务不会被额外流程拖慢，复杂任务则会得到更完整的检查。
 
 | 技能 | 关注点 |
 |------|--------|
@@ -88,19 +88,19 @@ HelloAGENTS 内置 14 个 `hello-*` 技能。技能只在当前阶段需要时�
 | `hello-api` | API 设计、校验、错误格式、兼容性 |
 | `hello-security` | 认证、密钥、权限、注入风险 |
 | `hello-test` | TDD、覆盖率、边界用例、测试结构 |
-| `hello-verify` | 审查、命令验证、交付证据、收尾 |
+| `qa-review` | 统一质量审查、命令验证、阻断修复、交付证据、收尾 |
+| `helloagents` | 命令路由、工作流阶段规则、项目知识和状态协调 |
 | `hello-errors` | 错误处理、日志、重试和恢复 |
 | `hello-perf` | 性能、缓存、查询和渲染风险 |
 | `hello-data` | 数据库、迁移、事务、索引 |
 | `hello-arch` | 架构、边界、代码体积、可维护性 |
 | `hello-debug` | 问题诊断和卡住时的升级处理 |
 | `hello-subagent` | 子代理分工和结果整合 |
-| `hello-review` | 代码审查和结构化问题记录 |
 | `hello-write` | 文档、报告和文字交付 |
 | `hello-reflect` | 可复用经验和知识更新 |
 
 所有 UI 任务都会先受共享的 UI 质量基线约束。
-在全局模式、已激活项目或明确的 UI 工作流里，`hello-ui` 会在该基线之上补充设计契约执行、设计系统映射与视觉验收。
+在宿主全局模式、已初始化项目或明确的 UI 工作流里，`hello-ui` 会在该基线之上补充设计契约执行、设计系统映射与视觉验收。
 当需要视觉证据时，HelloAGENTS 会写入当前会话的 `artifacts/visual.json`。
 
 ### 2）面向不同工作方式的命令
@@ -114,11 +114,10 @@ HelloAGENTS 内置 14 个 `hello-*` 技能。技能只在当前阶段需要时�
 | `~plan` | 需求、方案、任务拆分和方案包 |
 | `~build` | 按当前请求或现有方案实现 |
 | `~prd` | 通过逐维度讨论生成现代产品需求文档 |
-| `~loop` | 设置指标和守卫命令，循环改进、保留或回滚 |
-| `~wiki` | 只创建或同步项目知识库 |
-| `~init` | 完整项目初始化：知识库、项目级规则文件和包根链接 |
+| `~loop` | 长任务入口；在 Codex 中优先走 `/goal -> ~auto -> ~qa` |
+| `~init` | 初始化项目工作流并同步项目知识库 |
 | `~test` | 为指定模块或最近变更编写测试 |
-| `~verify` | 审查、运行验证命令、修复失败并收尾 |
+| `~qa` | 运行统一质量闭环：审查、验证命令、修复失败并收尾 |
 | `~commit` | 生成规范化提交信息并同步知识库 |
 | `~clean` | 归档已完成方案，清理临时运行文件 |
 | `~help` | 显示命令和当前设置 |
@@ -127,7 +126,7 @@ HelloAGENTS 内置 14 个 `hello-*` 技能。技能只在当前阶段需要时�
 
 - `~do` → `~build`
 - `~design` → `~plan`
-- `~review` → `~verify` 的审查优先模式
+- `~review` → `~qa`
 
 ### 3）项目知识库
 
@@ -146,9 +145,7 @@ HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
 | `plans/<feature>/` | 活跃方案包 |
 | `archive/` | 已归档方案包 |
 
-`~wiki` 只创建或更新知识库。
-
-`~init` 做得更多：创建或更新知识库、写入项目级规则文件，并刷新各宿主项目级 HelloAGENTS 包根链接。
+`~init` 用来初始化项目工作流：写入项目级 full carrier 标记、准备项目状态，并创建或更新知识库。
 
 ### 4）结构化方案包
 
@@ -179,7 +176,7 @@ HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
 
 `contract.json` 会影响验证范围、reviewer/tester 关注点、可选 advisor 检查和可选视觉验收。
 
-`tasks.md` 还会保留 Codex `/goal` 执行入口。长程 Codex 任务应使用这个已拆分入口，不要把原始产品文档直接交给 `/goal`。HelloAGENTS 保持 `/goal` 的 Codex 原生定位，只把它作为续跑和预算控制；方案文件、任务边界、验证与收尾仍由 HelloAGENTS 负责。
+`tasks.md` 还会保留 Codex `/goal` 执行入口。长程 Codex 任务应使用这个已拆分入口，不要把原始产品文档直接交给 `/goal`。默认链路是 `/goal -> ~auto -> ~qa`：`/goal` 负责长程续跑，`~auto` 负责执行 AFK 任务，`~qa` 负责最终质量闭环与收尾前验收。
 
 ### 5）状态与恢复
 
@@ -187,29 +184,38 @@ HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
 
 HelloAGENTS 现在只从 `state_path` 解析当前状态文件：
 
-- 宿主提供稳定会话标识时：`.helloagents/sessions/<workspace>/<session>/STATE.md`
-- 宿主未提供稳定会话标识时：`.helloagents/sessions/<workspace>/default/STATE.md`
+- 宿主提供稳定会话标识或可复用会话标识时：`.helloagents/sessions/<workspace>/<session>/STATE.md`
+- 暂时还拿不到可复用会话标识时：`.helloagents/sessions/<workspace>/default/STATE.md`
 
-`<workspace>` 是当前 Git 分支、detached HEAD 的 `detached-<sha>`，或非 Git 项目的 `workspace`。`.helloagents/sessions/active.json` 只记录当前活跃会话索引。
+`<workspace>` 是当前 Git 分支、detached HEAD 的 `detached-<sha>`，或非 Git 项目的 `workspace`。`<session>` 是当前项目本地会话标识。`.helloagents/sessions/active.json` 只保留最近一次活跃的工作区/会话映射和 alias 桥接，这样同一个 CLI 会话会稳定落在同一个目录里，`/resume` 也能复用它。
 
-`STATE.md` 只记录当前工作流做到哪里，不承担所有对话的统一记忆。
+对于项目本地会话目录，HelloAGENTS 会优先使用稳定宿主标识，如 `sessionId`、`conversationId`、`threadId` 或 `HELLOAGENTS_NOTIFY_SESSION_ID`。如果宿主只能提供 `WT_SESSION`、`TERM_SESSION_ID`、`WINDOWID` 这类窗口或终端标识，HelloAGENTS 只把它们当作轻量 alias 桥接，并优先复用已映射的会话目录，而不是继续分裂出重复目录。如果一个会话启动时还拿不到稳定宿主标识，HelloAGENTS 可以先落到 `default`，等同一个 CLI 会话后续拿到稳定标识时，仍继续复用这个活动目录，而不是再拆出第二个会话目录。
+
+`STATE.md` 只记录当前工作流做到哪里，不承担所有对话的统一记忆。Codex `/goal` 也不替代 `state_path`、`turn-state` 或本地证据文件；它只负责 Codex 侧的长程续跑。
 
 ### 6）验证与交付证据
 
 HelloAGENTS 不把“命令通过”和“任务完成”简单画等号。交付还可能要求需求覆盖、任务清单、审查证据、advisor 证据和视觉证据。
 
-运行态证据文件包括：
+运行态现在尽量收敛，只保留真正有用的文件：
 
-- `.helloagents/sessions/<workspace>/<session>/capsule.json`
-- `.helloagents/sessions/<workspace>/<session>/events.jsonl`
+- `.helloagents/sessions/<workspace>/<session>/STATE.md`
+- `.helloagents/sessions/<workspace>/<session>/runtime.json`
 - `.helloagents/sessions/active.json`
-- `.helloagents/sessions/<workspace>/<session>/artifacts/review.json`
+- `.helloagents/sessions/<workspace>/<session>/artifacts/qa-review.json`
 - `.helloagents/sessions/<workspace>/<session>/artifacts/advisor.json`
 - `.helloagents/sessions/<workspace>/<session>/artifacts/visual.json`
 - `.helloagents/sessions/<workspace>/<session>/artifacts/closeout.json`
-- `.helloagents/sessions/<workspace>/<session>/artifacts/loop-results.tsv`
+- 可选 `.helloagents/sessions/<workspace>/<session>/events.jsonl`
+- 仅用于 Codex 原生收尾去重的 `~/.codex/.helloagents/notify-state.json`
 
-交付门控、守卫和循环提示使用执行性表述，例如处理路径、收尾动作和视觉验收动作。阻塞流程会说明下一步要做什么，而不是把可执行步骤写成泛化建议。最终收尾还会强制只保留一个 HelloAGENTS 外层块，避免同一条回复重复输出完成标题。
+`STATE.md` 只保留给人看的恢复快照。`runtime.json` 只给机器用，只保存极少量运行态。`artifacts/*.json` 只保留结构化收据。`events.jsonl` 仍是可选 trace 输出，默认不写。
+项目本地 `STATE.md` 现在会更晚创建。
+
+标准运行态证据和临时运行态现在默认 72 小时过期。只有工作流明确需要的长程 Codex goal 链路，才继续保留 720 小时上限。
+
+交付门控、守卫和 QA gate 提示使用执行性表述，例如处理路径、收尾动作和视觉验收动作。阻塞流程会说明下一步要做什么，而不是把可执行步骤写成泛化建议。最终回复还会强制只保留一个 HelloAGENTS 外层块，避免同一条回复重复输出完成标题。
+这个外层格式现在只保留给直接面向最终用户的终局交付。中间汇报、委派任务结果和子代理回复都保持自然输出；子代理结束钩子也会拦截错误的外层收尾格式。
 
 ### 7）更安全的安装、更新、清理和诊断
 
@@ -219,8 +225,8 @@ CLI 显式管理宿主文件：
 - `update` 刷新指定目标或全部目标
 - `cleanup` 删除受管注入和链接
 - `uninstall` 在移除包前执行对应清理
-- `doctor` 检查规则文件、链接、hooks、配置项、插件根目录、缓存副本和版本漂移
-- 单 CLI 模式记录只会在宿主安装成功后写入，避免原生全局安装失败后留下错误模式记录
+- `doctor` 检查规则文件、链接、hooks、配置项、插件根目录、缓存副本和版本漂移；对 Codex 还会在可用时附带原生 `codex doctor` 结果
+- 单 CLI 模式记录只会在宿主安装成功后写入；如果原生全局清理失败，也会继续保留 `global` 记录，而不是悄悄叠加 standby
 
 ## 快速开始
 
@@ -264,17 +270,11 @@ helloagents install --all --global
 ~help
 ```
 
-应能看到 13 个对话命令和当前设置。
+应能看到可用对话命令和当前设置。
 
 ### 4）创建项目知识
 
-只创建知识库：
-
-```text
-~wiki
-```
-
-完整初始化项目：
+初始化项目工作流：
 
 ```text
 ~init
@@ -311,7 +311,7 @@ helloagents codex goals enable
 
 ### npm 和一键脚本入口
 
-当你不想依赖更新过程中的 `helloagents` 可执行文件时，用 npm 或一键脚本。`HELLOAGENTS=目标[:模式]` 中，目标支持 `all`、`claude`、`gemini`、`codex`；模式支持 `standby`、`global`。用于安装时，省略模式按 `standby` 处理；用于更新、清理、卸载和切换分支时，省略模式会原样下传，让 HelloAGENTS 先复用该 CLI 已记录或检测到的模式。
+当你不想依赖更新过程中的 `helloagents` 可执行文件时，用 npm 或一键脚本。`HELLOAGENTS=目标[:模式]` 中，目标支持 `all`、`claude`、`gemini`、`codex`；模式支持 `standby`、`global`。用于安装时，省略模式按 `standby` 处理；用于更新、清理、卸载和切换分支时，省略模式会原样下传，让 HelloAGENTS 先复用该 CLI 已记录或检测到的模式。如果未提供 `HELLOAGENTS`，一键安装脚本现在会保持“只装包/只升级包”的默认语义，不会自动部署任何宿主 CLI。若要安装自定义 tarball 或包规格，用 `HELLOAGENTS_PACKAGE`，不要写 `HELLOAGENTS_BRANCH`。对于已经装好的包，如需确保宿主一定刷新，优先在包命令后显式执行一次 `npm explore -g helloagents -- npm run sync-hosts -- ...`。
 
 宿主配置使用稳定的 `helloagents-js` 入口和运行根目录 `~/.helloagents/helloagents`，Node 全局包路径变化不会破坏受管 hooks 或 Codex `notify`。Codex hooks 使用独立 `~/.codex/hooks.json`，不把大段配置写入 `config.toml`；Codex 全局插件根目录和插件缓存也会回链到这个稳定运行根目录。
 
@@ -326,11 +326,13 @@ HELLOAGENTS=codex npm install -g helloagents
 # 安装到 Codex，全局模式
 HELLOAGENTS=codex:global npm install -g helloagents
 
-# 更新并同步 Claude，标准模式
-HELLOAGENTS=claude:standby npm update -g helloagents
+# 先更新包，再刷新 Claude，标准模式
+npm update -g helloagents
+npm explore -g helloagents -- npm run sync-hosts -- claude --standby
 
-# 切换到 beta 分支并同步全部 CLI，标准模式
-HELLOAGENTS=all:standby npm install -g github:hellowind777/helloagents#beta
+# 先切到 beta 分支，再刷新全部 CLI，标准模式
+npm install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz
+npm explore -g helloagents -- npm run sync-hosts -- --all --standby
 
 # 卸载包前清理 Gemini 集成
 npm explore -g helloagents -- npm run uninstall -- gemini --standby
@@ -346,11 +348,13 @@ $env:HELLOAGENTS="codex"; npm install -g helloagents
 # 安装到 Codex，全局模式
 $env:HELLOAGENTS="codex:global"; npm install -g helloagents
 
-# 更新并同步 Claude，标准模式
-$env:HELLOAGENTS="claude:standby"; npm update -g helloagents
+# 先更新包，再刷新 Claude，标准模式
+npm update -g helloagents
+npm explore -g helloagents -- npm run sync-hosts -- claude --standby
 
-# 切换到 beta 分支并同步全部 CLI，标准模式
-$env:HELLOAGENTS="all:standby"; npm install -g github:hellowind777/helloagents#beta
+# 先切到 beta 分支，再刷新全部 CLI，标准模式
+npm install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz
+npm explore -g helloagents -- npm run sync-hosts -- --all --standby
 
 # 卸载包前清理 Gemini 集成
 npm explore -g helloagents -- npm run uninstall -- gemini --standby
@@ -363,8 +367,10 @@ npm uninstall -g helloagents
 npm explore -g helloagents -- npm run deploy:global
 npm explore -g helloagents -- npm run sync-hosts -- --all --standby
 npm explore -g helloagents -- npm run cleanup-hosts -- codex --standby
-npm explore -g helloagents -- npm run uninstall -- --all --standby
+npm explore -g helloagents -- npm run uninstall -- --all
 ```
+
+首次安装仍然可以直接用 `HELLOAGENTS=目标[:模式]`。但对于更新、切换分支或强制重同步已安装包，以上显式 `npm run sync-hosts` 路径更确定。
 
 #### 一键脚本
 
@@ -406,7 +412,7 @@ $env:HELLOAGENTS="codex:standby"; $env:HELLOAGENTS_ACTION="cleanup"; irm https:/
 $env:HELLOAGENTS="gemini"; $env:HELLOAGENTS_ACTION="uninstall"; irm https://raw.githubusercontent.com/hellowind777/helloagents/main/install.ps1 | iex
 ```
 
-PowerShell 包装脚本现在会传递与 `install.sh` 相同的 npm 参数，因此安装、更新、清理、卸载和 `switch-branch` 走的是同一条生命周期链路。
+Shell 和 PowerShell 一键脚本现在都会先解析一次 `HELLOAGENTS`；未指定目标时保持普通包安装/升级语义；在更新、切分支和卸载前清掉生命周期环境变量，然后只走一条显式同步或清理链路。
 
 ### 分支切换
 
@@ -415,15 +421,15 @@ PowerShell 包装脚本现在会传递与 `install.sh` 相同的 npm 参数，�
 ```bash
 helloagents switch-branch beta
 helloagents switch-branch beta claude --global
-helloagents branch github:hellowind777/helloagents#beta --all --standby
+helloagents branch beta --all --standby
 ```
 
 如果只想切换包本身，暂不同步宿主 CLI，可以直接使用 npm：
 
 ```bash
-npm install -g github:hellowind777/helloagents#beta
+npm install -g https://github.com/hellowind777/helloagents/archive/refs/heads/beta.tar.gz
 npm update -g helloagents
-npm explore -g helloagents -- npm run uninstall -- --all --standby
+npm explore -g helloagents -- npm run uninstall -- --all
 npm uninstall -g helloagents
 ```
 
@@ -443,15 +449,17 @@ npm uninstall -g helloagents
 | Gemini CLI | 原生扩展安装 | 由 Gemini 扩展系统管理 |
 | Codex CLI | 原生本地插件流程 | `~/.agents/plugins/marketplace.json`、`~/plugins/helloagents/ -> ~/.helloagents/helloagents`、`~/.codex/plugins/cache/local-plugins/helloagents/local/ -> ~/.helloagents/helloagents`、`~/.codex/config.toml`、`~/.codex/hooks.json`、`~/.codex/helloagents -> ~/.helloagents/helloagents` |
 
-全局模式下，HelloAGENTS 会自动尝试宿主原生命令。若宿主命令不可用，再手动执行：
+全局模式下，HelloAGENTS 会自动尝试宿主原生命令。对 Claude Code，marketplace 应使用 Git URL 添加，这样插件安装阶段会继续走 HTTPS，不会落回 SSH-only clone。若宿主命令不可用，再手动执行：
 
 ```text
-/plugin marketplace add hellowind777/helloagents
+/plugin marketplace add https://github.com/hellowind777/helloagents.git
 /plugin install helloagents@helloagents
-gemini extensions install https://github.com/hellowind777/helloagents
+helloagents install gemini --global
 ```
 
 Claude Code 会自动尝试等价的 `claude plugin marketplace add ...` 和 `claude plugin install ...` 命令。marketplace 名称和插件名称都是 `helloagents`，所以安装目标是 `helloagents@helloagents`。全局安装后需要重启宿主 CLI。
+
+当你把 Claude 或 Gemini 从全局模式切回标准模式时，HelloAGENTS 会先移除原生插件或扩展。如果这一步失败，会继续把该宿主记录为 `global`，而不是静默叠加 standby。
 
 Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 
@@ -466,17 +474,16 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 | 先审查方案再实现 | `~plan "refactor payment module"` |
 | 按明确请求或活跃方案实现 | `~build "finish task 2 in the plan"` |
 | 生成完整产品需求文档 | `~prd "modern dashboard for operations team"` |
-| 按指标迭代优化 | `~loop "reduce bundle size" --metric "npm run size" --direction lower` |
-| 只创建或刷新项目知识 | `~wiki` |
-| 完整激活项目工作流 | `~init` |
-| 验证当前工作 | `~verify` |
+| 用 `/goal -> ~auto -> ~qa` 跑一个长程 Codex 任务 | `~loop "finish the auth refactor"` |
+| 初始化或刷新项目工作流 | `~init` |
+| 验证当前工作 | `~qa` |
 | 生成提交信息并同步知识库 | `~commit` |
 
-### 已激活项目与未激活项目
+### 项目初始化与宿主全局部署
 
-标准模式下，未激活项目只获得轻量规则和显式 `~command` 入口。项目中出现 `.helloagents/` 后才进入项目级工作流，通常由 `~wiki` 或 `~init` 创建。
+标准模式下，未初始化的项目只获得轻量规则和显式 `~command` 入口。执行 `~init` 后，项目级规则文件会写入 `<!-- HELLOAGENTS_PROFILE: full -->`，项目才进入已初始化状态。
 
-全局模式下，HelloAGENTS 默认启用完整规则。
+全局模式下，HelloAGENTS 会在宿主层默认启用完整规则。
 
 ## 项目知识库
 
@@ -488,9 +495,8 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 .helloagents/
 ```
 
-这个目录同时承担：
+这个目录承担：
 
-- 激活信号
 - 本地知识库目录
 - 方案目录
 - 状态与运行态目录
@@ -499,38 +505,37 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 
 当 `project_store_mode = "repo-shared"` 时：
 
-- 本地 `.helloagents/` 保留激活和运行态文件
+- 本地 `.helloagents/` 保留项目本地状态和运行态文件
 - 稳定知识和方案文件写到 `~/.helloagents/projects/<repo-key>/`
 - 同一 git 仓库的多个 worktree 可以共享这些稳定资料
 
 运行态文件仍保留在当前项目本地：
 
 - `state_path`
-- `.helloagents/sessions/<workspace>/<session>/capsule.json`
-- `.helloagents/sessions/<workspace>/<session>/events.jsonl`
 - `.helloagents/sessions/active.json`
+- `.helloagents/sessions/<workspace>/<session>/runtime.json`
 - `.helloagents/sessions/<workspace>/<session>/artifacts/*.json`
-- `.helloagents/sessions/<workspace>/<session>/artifacts/loop-results.tsv`
 
-### 未激活或临时会话
+### 项目本地存储之外的临时会话
 
-如果当前目录及其父级没有项目激活目录 `.helloagents/`，HelloAGENTS 不会自动写入项目目录。临时运行态写到用户级目录：
+如果当前任务是只读、且当前目录及其父级还没有项目本地 `.helloagents/` 目录，HelloAGENTS 会把短期运行态写到用户级目录：
 
 ```text
 ~/.helloagents/runtime/<scope-key>/
 ```
 
-这里仅保存短期的 `capsule.json`、`events.jsonl` 和 `artifacts/`，不作为项目知识库。过期临时会话会按 TTL 清理。
+这里仅保存短期的 `STATE.md`、`runtime.json` 和 `artifacts/`。`events.jsonl` 只有在启用 trace 时才会写入，不作为默认运行态文件。它也不属于项目知识库。过期临时会话会按 TTL 清理。
+
+一旦任务会创建或修改本地文件，或会在当前项目留下本地输出，HelloAGENTS 就会自动创建项目本地 `.helloagents/sessions/<workspace>/<session>/STATE.md`，而不是只停留在用户级临时运行态。
 
 ### 知识创建规则
 
 | 命令或配置 | 行为 |
 |------------|------|
-| `~wiki` | 只创建或同步知识库 |
-| `~init` | 创建知识库，同时写入项目级规则文件和包根链接 |
+| `~init` | 初始化项目工作流并同步知识库 |
 | `kb_create_mode = 0` | 关闭自动知识更新 |
-| `kb_create_mode = 1` | 已激活项目或全局模式中，编码任务自动更新知识 |
-| `kb_create_mode = 2` | 已激活项目或全局模式中，更积极地更新知识 |
+| `kb_create_mode = 1` | 仅在知识库已存在时自动同步 |
+| `kb_create_mode = 2` | 编码任务在知识库已存在或当前项目已初始化时自动创建或同步 |
 
 ## 工作流与交付
 
@@ -539,7 +544,7 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 结构化任务使用以下阶段：
 
 ```text
-ROUTE / TIER → SPEC → PLAN → BUILD → VERIFY → CONSOLIDATE
+ROUTE / TIER → SPEC → PLAN → BUILD → QA → CONSOLIDATE
 ```
 
 | 阶段 | 用途 |
@@ -548,7 +553,7 @@ ROUTE / TIER → SPEC → PLAN → BUILD → VERIFY → CONSOLIDATE
 | `SPEC` | 明确目标、约束和完成标准 |
 | `PLAN` | 准备方案文件并选择需要的技能 |
 | `BUILD` | 实现并做局部检查 |
-| `VERIFY` | 审查、运行命令、核对契约和证据 |
+| `QA` | 审查、运行命令、核对契约和证据 |
 | `CONSOLIDATE` | 更新状态、知识库和收尾证据 |
 
 ### 任务分层
@@ -614,11 +619,11 @@ UI 任务遵循以下优先级：
 | 键 | 默认值 | 含义 |
 |----|--------|------|
 | `output_language` | `""` | 默认跟随用户语言 |
-| `output_format` | `true` | 主代理最终收尾必须使用 HelloAGENTS 格式；中间输出和子代理输出保持自然 |
+| `output_format` | `true` | 仅主代理直接面向最终用户的终局交付使用 HelloAGENTS 格式；中间输出、委派结果和子代理输出保持自然 |
 | `notify_level` | `0` | `0` 关闭，`1` 桌面通知，`2` 声音，`3` 两者 |
-| `ralph_loop_enabled` | `true` | 显式 `~verify` / `~loop` 或收尾要求时运行验证 |
+| `ralph_loop_enabled` | `true` | 显式 `~qa` / `~loop` 或收尾要求时运行 QA stop gate |
 | `guard_enabled` | `true` | 拦截危险命令 |
-| `kb_create_mode` | `1` | 控制知识库自动更新 |
+| `kb_create_mode` | `1` | `0` 关闭，`1` 自动同步已有知识库，`2` 编码任务自动创建或同步知识库 |
 | `project_store_mode` | `"local"` | `local` 或 `repo-shared` |
 | `auto_commit_enabled` | `true` | 验证完成且工作区有变更时自动创建本地提交；`false` 只跳过自动提交 |
 | `commit_attribution` | `""` | 提交信息附加署名 |
@@ -635,6 +640,7 @@ UI 任务遵循以下优先级：
 - 标准模式在 `~/.claude/settings.json` 中写入受管 hooks 和权限
 - 标准模式创建 `~/.claude/helloagents -> ~/.helloagents/helloagents`
 - 全局模式使用 Claude Code 插件系统
+- 从全局模式切回标准模式前会先移除原生插件；如果失败，HelloAGENTS 会继续把 Claude 记录为 `global`
 
 ### Gemini CLI
 
@@ -642,6 +648,7 @@ UI 任务遵循以下优先级：
 - 标准模式在 `~/.gemini/settings.json` 中写入受管 hooks
 - 标准模式创建 `~/.gemini/helloagents -> ~/.helloagents/helloagents`
 - 全局模式使用 Gemini 扩展系统
+- 从全局模式切回标准模式前会先移除原生扩展；如果失败，HelloAGENTS 会继续把 Gemini 记录为 `global`
 
 ### Codex CLI
 
@@ -656,10 +663,12 @@ Codex 默认走规则文件驱动。
 - 这些 hook trust 状态是基于当前机器 `~/.codex/hooks.json` 真实绝对路径生成的本机状态；它不同于 `model_instructions_file = "~/.codex/AGENTS.md"` 这类可移植配置，应在每台机器上重新生成
 - 标准模式创建 `~/.codex/helloagents -> ~/.helloagents/helloagents`
 - 全局模式安装原生本地插件流程，但仍把 `~/.helloagents/helloagents` 作为唯一受管运行时源；插件根目录、插件缓存和 `~/.codex/helloagents` 都会回链到它
-- 清理时只删除 HelloAGENTS 自己写入的 hook trust 条目和旧式受管 notify 残留，不影响用户已有的 hook 状态
+- 如果你主要看重 Codex app / 插件发现链路，优先使用 `global`；如果你主要看重更轻量、更显式的项目工作流，保留 `standby`
+- 清理时只删除 HelloAGENTS 自己写入的 hook trust 条目，不影响用户已有的 hook 状态
 - Codex hooks 只做静默运行态同步和 Stop 门禁，不通过 hook 注入 HelloAGENTS 规则或路由说明
-- Codex 收尾会对 Stop hook 和原生 `codex-notify` 去重，避免同一轮重复通知
+- Codex 收尾会对 Stop hook 和原生 `codex-notify` 去重，避免同一轮重复通知；受管 Stop hook 生效时，client 为空的委派子任务完成事件也会保持静默
 - `/goal` 保持 Codex 原生能力；需要长程执行时，用 `helloagents codex goals enable` 显式启用
+- 按当前 OpenAI 文档，`/goal` 仍属于实验特性，Codex app 支持也仍在预览阶段。因此 HelloAGENTS 把它当作可选的 Codex 原生加速能力，而不是必需运行时依赖
 - 感知 goal 的命令从 `tasks.md`、`contract.json` 和 `state_path` 恢复；不会自动创建 goal，也不会在 HelloAGENTS 验证和收尾前标记完成
 
 ## 验证
@@ -670,18 +679,18 @@ Codex 默认走规则文件驱动。
 npm test
 ```
 
-当前测试共 124 项，覆盖：
+当前测试覆盖：
 
 - 安装、更新、清理、卸载、分支切换和模式切换
-- shell 与 PowerShell 一键脚本分发链路，以及包装脚本在安装、更新、清理、卸载和分支切换中的模式传递规则
-- Claude、Gemini、Codex 的配置合并、恢复，以及原生全局清理行为
+- shell 与 PowerShell 一键脚本分发链路，以及包装脚本在安装、更新、清理、卸载和分支切换中的环境清理与模式传递规则
+- Claude、Gemini、Codex 的宿主集成行为，包括全局切回标准模式的清理和原生清理失败时的模式保留
 - Codex 受管 `model_instructions_file`、`notify`、`hooks.json`、hook trust 状态、本地插件、marketplace 和缓存行为
-- Windows 下 Codex 旧式受管 notify 变体的清理，以及受管 notify 恢复规则
+- Codex 清理链路，以及受管 notify 恢复规则
 - Codex `/goal` 功能开关、长程路由上下文和 goal 感知命令契约
 - `helloagents doctor`
 - 项目存储和 `repo-shared`
-- 会话级 `state_path`、运行态信号和证据
-- 运行时注入、选路、Guard、验证、视觉证据、交付门控、收尾去重，以及原生安装失败后的模式记录
+- 工作区+会话级 `state_path`、运行态信号和证据
+- 运行时注入、选路、Guard、验证、视觉证据、交付门控、收尾去重、子代理外层格式与通知静默保护，以及原生安装失败后的模式记录
 - README 与 skill 契约一致性
 
 ## FAQ
@@ -699,17 +708,18 @@ npm test
 - `skills/` 定义任务类型相关行为
 - `scripts/` 提供选路、Guard、通知、验证、状态和证据等运行时辅助能力
 
-### 应该用 `~wiki` 还是 `~init`？
+### 应该用 `~init` 还是 `--global`？
 
-只想创建项目知识库，用 `~wiki`。
+在仓库里初始化当前项目工作流并同步项目知识，用 `~init`。
 
-还想写入项目级规则文件和宿主项目级 HelloAGENTS 包根链接，用 `~init`。
+想在宿主层对支持的 CLI 做全局部署，用 `helloagents --global`。
 
 ### standby 和 global 有什么区别？
 
-`standby` 更轻量、更显式。它只把规则部署到指定 CLI，完整项目流程由项目激活触发。
+`standby` 更轻量、更显式。它只把规则部署到指定 CLI，项目是否进入完整工作流由 `~init` 决定。
 
-`global` 默认更广泛地启用完整规则。Claude 和 Gemini 使用原生插件 / 扩展；Codex 使用本地插件路径。
+`global` 会在宿主层更广泛地启用完整规则。Claude 和 Gemini 使用原生插件 / 扩展；Codex 使用本地插件路径。
+如果你主要看重 Codex app / 插件发现链路，用 `global`。如果你主要看重更轻量、更显式的项目工作流，继续用 `standby`。
 
 ### Codex hooks 会显示注入内容吗？
 
@@ -724,7 +734,7 @@ npm test
 
 ### `npm uninstall -g helloagents` 会删除项目知识库吗？
 
-不会。卸载包前运行 `npm explore -g helloagents -- npm run uninstall -- --all --standby`，会清理宿主集成和稳定运行副本。项目 `.helloagents/` 文件和 `~/.helloagents/helloagents.json` 会保留，除非你手动删除。
+不会。卸载包前运行 `npm explore -g helloagents -- npm run uninstall -- --all`，HelloAGENTS 会按各 CLI 已记录或检测到的模式清理宿主集成和稳定运行副本。项目 `.helloagents/` 文件和 `~/.helloagents/helloagents.json` 会保留，除非你手动删除。
 
 <details>
 <summary><strong>Q：仓库里还保留 ~fullstack 吗？</strong></summary>

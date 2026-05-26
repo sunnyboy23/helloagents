@@ -9,13 +9,18 @@ set -eu
 #   HELLOAGENTS_TARGET=all|claude|gemini|codex
 #   HELLOAGENTS_MODE=standby|global
 #   HELLOAGENTS_BRANCH=main|beta|...
-#   HELLOAGENTS_PACKAGE=helloagents|github:owner/repo#ref|...
+#   HELLOAGENTS_PACKAGE=helloagents|https://github.com/owner/repo/archive/refs/heads/ref.tar.gz|...
 
 ACTION="${HELLOAGENTS_ACTION:-install}"
 TARGET="${HELLOAGENTS_TARGET:-}"
 MODE="${HELLOAGENTS_MODE:-}"
 BRANCH="${HELLOAGENTS_BRANCH:-}"
 PACKAGE="${HELLOAGENTS_PACKAGE:-}"
+HAS_EXPLICIT_PACKAGE=0
+HAS_EXPLICIT_TARGET=0
+if [ -n "$PACKAGE" ]; then
+  HAS_EXPLICIT_PACKAGE=1
+fi
 
 if [ -n "${HELLOAGENTS:-}" ]; then
   SPEC_TARGET="${HELLOAGENTS%%:*}"
@@ -29,6 +34,10 @@ if [ -n "${HELLOAGENTS:-}" ]; then
   fi
   TARGET="${TARGET:-$SPEC_TARGET}"
   MODE="${MODE:-$SPEC_MODE}"
+fi
+
+if [ -n "$TARGET" ]; then
+  HAS_EXPLICIT_TARGET=1
 fi
 
 TARGET="${TARGET:-all}"
@@ -49,11 +58,24 @@ fi
 
 if [ -z "$PACKAGE" ]; then
   if [ -n "$BRANCH" ]; then
-    PACKAGE="github:hellowind777/helloagents#$BRANCH"
+    PACKAGE="https://github.com/hellowind777/helloagents/archive/refs/heads/$BRANCH.tar.gz"
   else
     PACKAGE="helloagents"
   fi
 fi
+
+clear_lifecycle_env() {
+  unset HELLOAGENTS
+  unset HELLOAGENTS_ACTION
+  unset HELLOAGENTS_TARGET
+  unset HELLOAGENTS_HOST
+  unset HELLOAGENTS_MODE
+  unset HELLOAGENTS_BRANCH
+  unset HELLOAGENTS_PACKAGE
+  unset HELLOAGENTS_DEPLOY
+}
+
+clear_lifecycle_env
 
 sync_hosts() {
   if [ "$TARGET" = "all" ]; then
@@ -111,22 +133,26 @@ enable_postinstall_deploy() {
 
 case "$ACTION" in
   install)
-    enable_postinstall_deploy
+    if [ "$HAS_EXPLICIT_TARGET" -eq 1 ]; then
+      enable_postinstall_deploy
+    fi
     npm install -g "$PACKAGE"
     ;;
   update)
-    if [ -n "$BRANCH" ] || [ -n "${HELLOAGENTS_PACKAGE:-}" ]; then
+    if [ -n "$BRANCH" ] || [ "$HAS_EXPLICIT_PACKAGE" -eq 1 ]; then
       npm install -g "$PACKAGE"
     else
       npm update -g helloagents || npm install -g helloagents
     fi
-    sync_hosts
+    if [ "$HAS_EXPLICIT_TARGET" -eq 1 ]; then
+      sync_hosts
+    fi
     ;;
   cleanup)
     cleanup_hosts
     ;;
   switch-branch|branch)
-    if [ -z "$BRANCH" ] && [ -z "${HELLOAGENTS_PACKAGE:-}" ]; then
+    if [ -z "$BRANCH" ] && [ "$HAS_EXPLICIT_PACKAGE" -ne 1 ]; then
       echo "HELLOAGENTS_BRANCH or HELLOAGENTS_PACKAGE is required for switch-branch" >&2
       exit 1
     fi

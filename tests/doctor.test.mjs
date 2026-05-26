@@ -13,12 +13,13 @@ import {
   writeText,
 } from './helpers/test-env.mjs'
 
-function runCli(pkgRoot, home, args) {
+function runCli(pkgRoot, home, args, env = {}) {
   const result = runNode(join(pkgRoot, 'cli.mjs'), args, {
     cwd: pkgRoot,
     env: {
       ...buildHomeEnv(home),
       LANG: 'en_US.UTF-8',
+      ...env,
     },
   })
   assert.equal(result.status, 0, result.stderr || result.stdout)
@@ -55,6 +56,11 @@ test('doctor reports codex standby health and detects drift in JSON mode', () =>
   assert.equal(codex.checks.standaloneHooksMatch, true)
   assert.equal(codex.checks.managedHookTrust, true)
   assert.equal(codex.checks.managedHookTrustMatch, true)
+  assert.equal(typeof codex.nativeDoctor?.available, 'boolean')
+  if (codex.nativeDoctor?.available) {
+    assert.equal(typeof codex.nativeDoctor.ok, 'boolean')
+    assert.equal(Array.isArray(codex.nativeDoctor.summary?.skillsSelected), true)
+  }
 
   rmSync(join(home, '.codex', 'helloagents'), { recursive: true, force: true })
 
@@ -139,13 +145,15 @@ test('doctor reports codex global health with a home carrier baseline', () => {
   assert.equal(codex.checks.pluginCache, true)
   assert.equal(codex.checks.pluginRootLink, true)
   assert.equal(codex.checks.pluginCacheLink, true)
+  assert.match(readText(join(home, '.codex', 'AGENTS.md')), /HELLOAGENTS_PROFILE: full/)
   assert.equal(codex.checks.standaloneHooks, true)
   assert.equal(codex.checks.standaloneHooksMatch, true)
   assert.equal(codex.checks.managedHookTrust, true)
   assert.equal(codex.checks.managedHookTrustMatch, true)
+  assert.equal(typeof codex.nativeDoctor?.available, 'boolean')
 })
 
-test('doctor treats latest Codex hooks=false as drift and legacy codex_hooks as a note', () => {
+test('doctor treats latest Codex hooks=false as drift', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
 
@@ -154,7 +162,6 @@ test('doctor treats latest Codex hooks=false as drift and legacy codex_hooks as 
     [
       '[features]',
       'hooks = false',
-      'codex_hooks = true',
       '',
     ].join('\n'),
   )
@@ -168,9 +175,7 @@ test('doctor treats latest Codex hooks=false as drift and legacy codex_hooks as 
 
   assert.equal(codex.status, 'drift')
   assert.equal(codex.checks.codexHooksFeature, false)
-  assert.equal(codex.checks.legacyCodexHooksFeature, true)
   assert.ok(codex.issues.some((issue) => issue.code === 'codex-hooks-feature-disabled'))
-  assert.ok(codex.notes.some((note) => /codex_hooks/.test(note)))
 })
 
 test('doctor flags missing codex hook trust as drift', () => {
@@ -198,4 +203,20 @@ test('doctor flags missing codex hook trust as drift', () => {
   assert.equal(codex.checks.managedHookTrust, false)
   assert.ok(codex.issues.some((issue) => issue.code === 'standby-hook-trust-missing'))
   assert.ok(codex.issues.some((issue) => /machine-local hook trust metadata/.test(issue.message)))
+})
+
+test('doctor reports native Codex doctor when codex.cmd is available on Windows', { skip: process.platform !== 'win32' }, () => {
+  const { root: pkgRoot } = createPackageFixture()
+  const home = createHomeFixture()
+
+  writeText(join(home, '.codex', 'config.toml'), '[features]\nunified_exec = true\n')
+
+  runCli(pkgRoot, home, ['postinstall'])
+  runCli(pkgRoot, home, ['install', 'codex', '--standby'])
+
+  const result = runCli(pkgRoot, home, ['doctor', 'codex', '--json'])
+  const report = JSON.parse(result.stdout)
+  const codex = report.hosts.find((entry) => entry.host === 'codex')
+
+  assert.equal(codex.nativeDoctor.available, true)
 })

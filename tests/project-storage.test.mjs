@@ -17,7 +17,7 @@ import {
 import { getSessionStatePath, parseStdoutJson, writeSettings } from './helpers/runtime-test-helpers.mjs'
 
 const PROJECT_STORAGE_MODULE_URL = pathToFileURL(join(REPO_ROOT, 'scripts', 'project-storage.mjs')).href
-const VERIFY_STATE_MODULE_URL = pathToFileURL(join(REPO_ROOT, 'scripts', 'verify-state.mjs')).href
+const QA_REVIEW_STATE_MODULE_URL = pathToFileURL(join(REPO_ROOT, 'scripts', 'qa-review-state.mjs')).href
 const WORKFLOW_PLAN_FILES_MODULE_URL = pathToFileURL(join(REPO_ROOT, 'scripts', 'workflow-plan-files.mjs')).href
 
 function assertCommandOk(result) {
@@ -105,7 +105,7 @@ test('repo-shared mode resolves shared verify.yaml and plan packages from local 
     cwd: project,
     env,
     source: `
-      const { detectCommands } = await import(${JSON.stringify(VERIFY_STATE_MODULE_URL)})
+      const { detectCommands } = await import(${JSON.stringify(QA_REVIEW_STATE_MODULE_URL)})
       const { getWorkflowSnapshot } = await import(${JSON.stringify(WORKFLOW_PLAN_FILES_MODULE_URL)})
       const snapshot = getWorkflowSnapshot(${JSON.stringify(project)})
       const primaryPlan = snapshot.plans[0] || null
@@ -150,6 +150,7 @@ test('notify inject and command routing expose repo-shared project storage hints
   assert.match(payload.hookSpecificOutput.additionalContext, /当前项目存储/)
   assert.match(payload.hookSpecificOutput.additionalContext, /"project_store_mode": "repo-shared"/)
   assert.match(payload.hookSpecificOutput.additionalContext, /"knowledge_base_dir":/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /"project_local_dir":/)
 
   result = runNode(notifyScript, ['route'], {
     cwd: project,
@@ -161,12 +162,12 @@ test('notify inject and command routing expose repo-shared project storage hints
   assert.match(payload.hookSpecificOutput.additionalContext, /知识库\/方案目录改为/)
 })
 
-test('notify inject exposes session-scoped state path when session identifiers exist', () => {
+test('notify inject exposes workspace-session state path when session identifiers exist', () => {
   const { root: pkgRoot } = createPackageFixture()
   const home = createHomeFixture()
   const env = {
     ...buildHomeEnv(home),
-    WT_SESSION: 'wt-session-abcdef123456',
+    HELLOAGENTS_NOTIFY_SESSION_ID: 'host-session-abcdef123456',
   }
   const project = createTempDir('helloagents-storage-session-inject-')
   const notifyScript = join(pkgRoot, 'scripts', 'notify.mjs')
@@ -185,17 +186,16 @@ test('notify inject exposes session-scoped state path when session identifiers e
     input: JSON.stringify({ cwd: project, source: 'startup' }),
   })
   const payload = parseStdoutJson(result)
-  assert.match(payload.hookSpecificOutput.additionalContext, /"state_scope": "session"/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /"state_scope": "workspace-session"/)
   assert.match(payload.hookSpecificOutput.additionalContext, /feature-session-inject/)
-  assert.match(payload.hookSpecificOutput.additionalContext, /abcdef12/)
-  assert.match(payload.hookSpecificOutput.additionalContext, /sessions[\\/].*STATE\.md/)
+  assert.match(payload.hookSpecificOutput.additionalContext, /host-[a-z0-9]{8}[\\/]+STATE\.md/)
 })
 
-test('session-scoped state path isolates branch and terminal session in session-only storage', () => {
+test('workspace-session state path isolates branch while preserving runtime mode metadata', () => {
   const home = createHomeFixture()
   const env = {
     ...buildHomeEnv(home),
-    WT_SESSION: 'wt-session-abcdef123456',
+    HELLOAGENTS_NOTIFY_SESSION_ID: 'host-session-abcdef123456',
   }
   const repo = createTempDir('helloagents-storage-session-')
 
@@ -214,21 +214,21 @@ test('session-scoped state path isolates branch and terminal session in session-
     `,
   })
 
-  assert.equal(payload.stateScope, 'session')
-  assert.equal(payload.stateSessionToken, 'abcdef12')
+  assert.equal(payload.stateScope, 'workspace-session')
+  assert.match(payload.stateSessionToken, /^host-[a-z0-9]{8}$/)
   assert.equal(payload.stateSessionMode, 'host-session')
   assert.equal(payload.stateWorkspace, 'feature-state-scope')
   assert.equal(
     normalizePathForAssert(payload.statePath),
-    normalizePathForAssert(join(repo, '.helloagents', 'sessions', 'feature-state-scope', 'abcdef12', 'STATE.md')),
+    normalizePathForAssert(join(repo, '.helloagents', 'sessions', 'feature-state-scope', payload.stateSessionToken, 'STATE.md')),
   )
 })
 
-test('workflow snapshot reads the current session STATE or workspace default slot only', () => {
+test('workflow snapshot always reads the workspace STATE file', () => {
   const home = createHomeFixture()
   const env = {
     ...buildHomeEnv(home),
-    WT_SESSION: 'wt-session-abcdef123456',
+    HELLOAGENTS_NOTIFY_SESSION_ID: 'host-session-abcdef123456',
   }
   const repo = createTempDir('helloagents-storage-session-fallback-')
   const feature = '202604080101_session-plan'
@@ -246,11 +246,11 @@ test('workflow snapshot reads the current session STATE or workspace default slo
     ['# scoped', '', '## 任务列表', '- [ ] 读取会话级 STATE（涉及文件：src/demo.ts；完成标准：会话快照优先；验证方式：npm test）', ''].join('\n'),
   )
   writeText(
-    join(repo, '.helloagents', 'sessions', 'feature-session-fallback', 'abcdef12', 'STATE.md'),
+    join(repo, '.helloagents', 'sessions', 'feature-session-fallback', 'host-abcdef12', 'STATE.md'),
     ['# 恢复快照', '', '## 主线目标', '当前会话恢复快照', '', '## 方案', `.helloagents/plans/${feature}`, ''].join('\n'),
   )
   writeText(
-    getSessionStatePath(repo, { workspace: 'feature-session-fallback', session: 'default' }),
+    getSessionStatePath(repo, { workspace: 'feature-session-fallback' }),
     ['# 恢复快照', '', '## 主线目标', '当前工作区默认会话恢复快照', '', '## 方案', `.helloagents/plans/${feature}`, ''].join('\n'),
   )
 
@@ -264,11 +264,12 @@ test('workflow snapshot reads the current session STATE or workspace default slo
   })
 
   assert.equal(payload.sessionScoped, true)
-  assert.equal(payload.stateScope, 'session')
+  assert.equal(payload.stateScope, 'workspace-session')
   assert.equal(payload.stateSessionMode, 'host-session')
+  assert.match(payload.stateSessionToken, /^host-[a-z0-9]{8}$/)
   assert.equal(
     normalizePathForAssert(payload.statePath),
-    normalizePathForAssert(join(repo, '.helloagents', 'sessions', 'feature-session-fallback', 'abcdef12', 'STATE.md')),
+    normalizePathForAssert(join(repo, '.helloagents', 'sessions', 'feature-session-fallback', payload.stateSessionToken, 'STATE.md')),
   )
   assert.equal(payload.referencedPlanDir, join(repo, '.helloagents', 'plans', feature))
 
@@ -293,8 +294,9 @@ test('workflow snapshot reads the current session STATE or workspace default slo
   })
 
   assert.equal(payload.sessionScoped, true)
-  assert.equal(payload.stateScope, 'session')
-  assert.equal(payload.stateSessionMode, 'default')
-  assert.equal(payload.statePath, getSessionStatePath(repo, { workspace: 'feature-session-fallback', session: 'default' }))
+  assert.equal(payload.stateScope, 'workspace-session')
+  assert.equal(payload.stateSessionMode, 'unidentified')
+  assert.equal(payload.stateSessionToken, '')
+  assert.equal(payload.statePath, getSessionStatePath(repo, { workspace: 'feature-session-fallback' }))
   assert.equal(payload.referencedPlanDir, join(repo, '.helloagents', 'plans', feature))
 })

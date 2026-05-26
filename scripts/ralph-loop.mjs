@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * HelloAGENTS Ralph Loop — Quality verification gate
+ * HelloAGENTS QA Gate — Quality verification gate
  * Runs on SubagentStop (Claude Code) and Stop (Codex CLI).
  * Auto-detects lint/test commands and blocks if they fail.
  */
@@ -9,7 +9,13 @@ import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { clearVerifyEvidence, detectCommands, hasUnsafeVerifyCommand, writeVerifyEvidence } from './verify-state.mjs';
+import {
+  clearQaReviewEvidence,
+  detectCommands,
+  getQaReviewEvidenceStatus,
+  hasUnsafeQaCommand,
+  writeQaReviewEvidence,
+} from './qa-review-state.mjs';
 import {
   getRuntimeEvidencePath,
   readRuntimeEvidence,
@@ -70,7 +76,7 @@ function hasGitChanges(cwd) {
 function runVerify(commands, cwd) {
   const failures = [];
   for (const cmd of commands) {
-    if (hasUnsafeVerifyCommand([cmd])) {
+    if (hasUnsafeQaCommand([cmd])) {
       failures.push({ cmd, output: '已阻止：验证命令不允许使用 shell 组合操作符' });
       continue;
     }
@@ -87,6 +93,83 @@ function runVerify(commands, cwd) {
     }
   }
   return failures;
+}
+
+function getLastAssistantMessage(data = {}) {
+  return String(
+    data.lastAssistantMessage
+    || data.last_assistant_message
+    || data['last-assistant-message']
+    || '',
+  ).trim();
+}
+
+function hasTruthyAgentFlag(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'subagent'].includes(normalized);
+}
+
+function hasNonEmptyValue(value) {
+  return String(value || '').trim().length > 0;
+}
+
+function looksLikeCodexDelegatedTurn(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  const client = String(data.client || '').trim();
+  const inputMessages = Array.isArray(data.inputMessages) ? data.inputMessages : [];
+  return !client && inputMessages.length > 1;
+}
+
+function inferSubagentFromPayload(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+
+  if ([data.isSubagent, data.subagent].some(hasTruthyAgentFlag)) {
+    return true;
+  }
+
+  const roleLike = [
+    data.role,
+    data.agentRole,
+    data.agent_role,
+    data.agentKind,
+    data.agent_kind,
+    data.kind,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (roleLike.some((value) => ['subagent', 'delegate', 'delegated', 'worker', 'explorer'].includes(value))) {
+    return true;
+  }
+
+  if ([
+    data.parentAgentId,
+    data.parent_agent_id,
+    data.parentTurnId,
+    data.parent_turn_id,
+    data.delegatedByAgentId,
+    data.delegated_by_agent_id,
+  ].some(hasNonEmptyValue)) {
+    return true;
+  }
+
+  return looksLikeCodexDelegatedTurn(data);
+}
+
+function hasHelloagentsWrapper(message = '') {
+  if (!message.includes('【HelloAGENTS】')) return false;
+  const firstNonEmptyLine = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return /^[💡⚡🔵✅❓⚠️❌]【HelloAGENTS】- /.test(firstNonEmptyLine || '') || message.includes('【HelloAGENTS】');
+}
+
+function validateSubagentOutput(data = {}) {
+  const message = getLastAssistantMessage(data);
+  if (!message || !hasHelloagentsWrapper(message)) return '';
+  return '[HelloAGENTS Runtime] 子代理输出不应使用 HelloAGENTS 外层格式。当前回复不是直接面向最终用户的终局交付，请改为自然输出，只返回结果、证据或阻塞项。';
 }
 
 /** Filter commands to fast checks only for subagent mode. Returns null if no fast commands found. */
@@ -114,8 +197,19 @@ export function evaluateRalphLoop(data = {}, runtime = {}) {
 
   const cwd = data.cwd || process.cwd();
   const runtimeOptions = { payload: data };
-  const isSubagent = runtime.isSubagent ?? IS_SUBAGENT;
+  const isSubagent = runtime.isSubagent === true || inferSubagentFromPayload(data) || IS_SUBAGENT;
   const hookEventName = runtime.hookEventName || HOOK_EVENT;
+
+  if (isSubagent) {
+    const formatReason = validateSubagentOutput(data);
+    if (formatReason) {
+      return {
+        decision: 'block',
+        reason: formatReason,
+        suppressOutput: true,
+      };
+    }
+  }
 
   let commands = detectCommands(cwd);
   if (!commands?.length) {
@@ -131,17 +225,30 @@ export function evaluateRalphLoop(data = {}, runtime = {}) {
   const failures = runVerify(commands, cwd);
   if (failures.length === 0) {
     resetBreaker(cwd, runtimeOptions);
-    writeVerifyEvidence(cwd, {
-      commands: detectCommands(cwd),
-      fastOnly: isSubagent,
-      source: isSubagent ? 'subagent' : 'stop',
-    }, runtimeOptions);
+    const qaStatus = getQaReviewEvidenceStatus(cwd, {
+      required: true,
+      ...runtimeOptions,
+    });
+    if (qaStatus.status !== 'valid') {
+      writeQaReviewEvidence(cwd, {
+        source: isSubagent ? 'subagent' : 'ralph-loop',
+        originCommand: 'qa',
+        qaMode: 'standard',
+        scope: isSubagent ? 'subagent-fast-check' : 'runtime-fast-check',
+        outcome: 'clean',
+        conclusion: '自动命令检查通过。',
+        findings: [],
+        fileReferences: [],
+        commands: detectCommands(cwd),
+        fastOnly: true,
+      }, runtimeOptions);
+    }
 
     if (isSubagent) {
       return {
         hookSpecificOutput: {
           hookEventName,
-          additionalContext: '子代理快速验证通过（lint/typecheck）。请控制器审查变更后继续。',
+          additionalContext: '子代理快速 QA 命令检查通过（lint/typecheck）。请控制器继续完整 qa-review。',
         },
         suppressOutput: true,
       };
@@ -151,7 +258,7 @@ export function evaluateRalphLoop(data = {}, runtime = {}) {
       return {
         hookSpecificOutput: {
           hookEventName,
-          additionalContext: '⚠️ [Ralph Loop] 验证通过但未检测到代码变更（git diff 为空）。如果确实完成了编码任务，请确认变更已保存。',
+          additionalContext: '⚠️ [QA Gate] 验证通过但未检测到代码变更（git diff 为空）。如果确实完成了编码任务，请确认变更已保存。',
         },
         suppressOutput: true,
       };
@@ -160,7 +267,7 @@ export function evaluateRalphLoop(data = {}, runtime = {}) {
     return { suppressOutput: true };
   }
 
-  clearVerifyEvidence(cwd, runtimeOptions);
+  clearQaReviewEvidence(cwd, runtimeOptions);
   const breaker = readBreaker(cwd, runtimeOptions);
   breaker.consecutive_failures += 1;
   breaker.last_failure = new Date().toISOString();
@@ -172,7 +279,7 @@ export function evaluateRalphLoop(data = {}, runtime = {}) {
   const details = failures.map(f => `\u2717 ${f.cmd}\n${f.output}`).join('\n\n');
   return {
     decision: 'block',
-    reason: `[Ralph Loop] 验证失败：\n\n${details}\n\n请先修复以上问题，再报告完成。${breakerWarning}`,
+    reason: `[QA Gate] 验证失败：\n\n${details}\n\n请先修复以上问题，再报告完成。${breakerWarning}`,
     suppressOutput: true,
   };
 }
@@ -190,7 +297,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   } catch (error) {
     process.stdout.write(JSON.stringify({
       decision: 'block',
-      reason: `[Ralph Loop] 验证脚本执行异常，已暂停完成通知。\n原因：${error?.message || error}`,
+      reason: `[QA Gate] 验证脚本执行异常，已暂停完成通知。\n原因：${error?.message || error}`,
       suppressOutput: true,
     }));
   }

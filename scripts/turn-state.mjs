@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 import {
   appendSessionEvent,
   clearCapsuleSection,
-  getSessionCapsulePath,
   getRuntimeScope,
   readCapsuleSection,
   writeCapsuleSection,
@@ -123,7 +122,7 @@ export function readTurnState(cwd = process.cwd(), { now = Date.now(), ...option
   return {
     cwd: normalizePath(entry.cwd),
     key: entry.key || '',
-    path: getSessionCapsulePath(cwd, options),
+    path: getRuntimeScope(cwd, options).statePath,
     updatedAt: entry.updatedAt,
     ...normalized,
   }
@@ -134,6 +133,13 @@ export function writeTurnState(cwd = process.cwd(), input = {}) {
     payload: input.payload && typeof input.payload === 'object' ? input.payload : input,
     env: input.env || process.env,
     ppid: input.ppid ?? process.ppid,
+    ensureProjectLocal: true,
+    stateSeed: {
+      goal: '记录当前非只读任务状态',
+      doing: '正在写入 turn-state',
+      context: '由运行时在需要识别完成、等待或阻塞时自动创建',
+      next: '根据当前 turn-state 继续或等待后续动作',
+    },
   }
   const scope = getRuntimeScope(cwd, runtimeOptions)
   const normalized = normalizeTurnState(input)
@@ -296,7 +302,7 @@ function main() {
     const payload = writeTurnState(cwd, input)
     process.stdout.write(JSON.stringify({
       suppressOutput: true,
-      path: getSessionCapsulePath(cwd, input),
+      path: getRuntimeScope(cwd, input).statePath,
       payload,
     }))
     return

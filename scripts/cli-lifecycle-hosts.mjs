@@ -1,6 +1,12 @@
 import { spawnSync } from 'node:child_process'
+import { platform } from 'node:os'
 
-import { installClaudeStandby, installGeminiStandby, uninstallClaudeStandby, uninstallGeminiStandby } from './cli-hosts.mjs'
+import {
+  installClaudeStandby,
+  installGeminiStandby,
+  uninstallClaudeStandby,
+  uninstallGeminiStandby,
+} from './cli-hosts.mjs'
 import {
   cleanupCodexGlobalResidueForStandby,
   installCodexGlobal,
@@ -12,23 +18,50 @@ import { getHostLabel } from './cli-host-detect.mjs'
 
 const CLAUDE_COMMAND = process.env.HELLOAGENTS_CLAUDE_CMD || 'claude'
 const GEMINI_COMMAND = process.env.HELLOAGENTS_GEMINI_CMD || 'gemini'
-const CLAUDE_MARKETPLACE = 'hellowind777/helloagents'
+const CLAUDE_MARKETPLACE = 'https://github.com/hellowind777/helloagents.git'
 const CLAUDE_PLUGIN = 'helloagents@helloagents'
-const GEMINI_EXTENSION = 'https://github.com/hellowind777/helloagents'
+
+function normalizeCommand(command = '') {
+  return String(command || '').trim()
+}
+
+function commandCandidates(command = '') {
+  const normalized = normalizeCommand(command)
+  if (!normalized) return []
+
+  if (platform() !== 'win32') return [normalized]
+
+  const candidates = new Set([normalized])
+  if (!/\.(cmd|bat|exe|ps1)$/i.test(normalized)) {
+    candidates.add(`${normalized}.cmd`)
+    candidates.add(`${normalized}.exe`)
+  }
+  return [...candidates]
+}
 
 function runHostCommand(command, args) {
-  const needsShell = process.platform === 'win32' && /\.cmd$/i.test(command)
-  const result = spawnSync(command, args, {
-    encoding: 'utf-8',
-    errors: 'replace',
-    shell: needsShell,
-    windowsHide: true,
-  })
-  const errorMessage = result.error?.message || ''
+  const attempts = commandCandidates(command)
+  let lastResult = null
+
+  for (const candidate of attempts) {
+    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(candidate)
+    const result = spawnSync(candidate, args, {
+      encoding: 'utf-8',
+      errors: 'replace',
+      shell: needsShell,
+      windowsHide: true,
+    })
+    lastResult = result
+    if (!result.error || !['ENOENT', 'EINVAL'].includes(result.error.code)) {
+      break
+    }
+  }
+
+  const errorMessage = lastResult?.error?.message || ''
   return {
-    ok: result.status === 0,
-    missing: result.error?.code === 'ENOENT',
-    output: `${result.stdout || ''}${result.stderr || ''}${errorMessage}`.trim(),
+    ok: lastResult?.status === 0,
+    missing: ['ENOENT', 'EINVAL'].includes(lastResult?.error?.code || ''),
+    output: `${lastResult?.stdout || ''}${lastResult?.stderr || ''}${errorMessage}`.trim(),
   }
 }
 
@@ -41,6 +74,13 @@ function buildNativeResult(result, successCN, successEN, manualCN, manualEN) {
   }
 }
 
+function preserveTrackedModeOnFailure(result = {}, trackedMode = '') {
+  if (result.ok === false && trackedMode) {
+    return { ...result, trackedModeOnFailure: trackedMode }
+  }
+  return result
+}
+
 function installClaudeGlobalPlugin() {
   const add = runHostCommand(CLAUDE_COMMAND, ['plugin', 'marketplace', 'add', CLAUDE_MARKETPLACE])
   if (!add.ok && add.missing) return { ok: false, output: '未找到 claude 命令' }
@@ -48,8 +88,8 @@ function installClaudeGlobalPlugin() {
   return { ok: install.ok, output: install.output || add.output }
 }
 
-function installGeminiGlobalExtension() {
-  return runHostCommand(GEMINI_COMMAND, ['extensions', 'install', GEMINI_EXTENSION])
+function installGeminiGlobalExtension(runtimeRoot) {
+  return runHostCommand(GEMINI_COMMAND, ['extensions', 'link', runtimeRoot])
 }
 
 function removeClaudeGlobalPlugin() {
@@ -65,8 +105,11 @@ function reportHostAction(runtime, action, host, mode, result = {}) {
   const isCleanup = action === 'cleanup' || action === 'uninstall'
   if (result.skipped) {
     console.log(runtime.msg(`  - ${label} 未检测到，跳过`, `  - ${label} not detected, skipped`))
-  } else if (result.ok === false && !isCleanup) {
-    console.log(runtime.msg(`  - ${label} 自动配置未完成`, `  - ${label} automatic setup did not complete`))
+  } else if (result.ok === false) {
+    console.log(runtime.msg(
+      isCleanup ? `  - ${label} 自动清理未完成` : `  - ${label} 自动配置未完成`,
+      isCleanup ? `  - ${label} automatic cleanup did not complete` : `  - ${label} automatic setup did not complete`,
+    ))
   } else if (isCleanup) {
     runtime.ok(runtime.msg(`${label} 已清理（${mode} 模式）`, `${label} cleaned (${mode} mode)`))
   } else if (mode === 'standby') {
@@ -82,14 +125,46 @@ function reportHostAction(runtime, action, host, mode, result = {}) {
   }
 }
 
-function installHostStandby(runtime, host) {
+function prepareClaudeStandby(previousMode) {
+  if (previousMode !== 'global') return {}
+  return preserveTrackedModeOnFailure(
+    buildNativeResult(
+      removeClaudeGlobalPlugin(),
+      '已自动移除 Claude Code 插件',
+      'Claude Code plugin removed automatically',
+      '切到 standby 前无法自动移除 Claude Code 插件，请先在 Claude Code 中执行: /plugin remove helloagents',
+      'Could not remove the Claude Code plugin before switching to standby. Run inside Claude Code: /plugin remove helloagents',
+    ),
+    'global',
+  )
+}
+
+function prepareGeminiStandby(previousMode) {
+  if (previousMode !== 'global') return {}
+  return preserveTrackedModeOnFailure(
+    buildNativeResult(
+      removeGeminiGlobalExtension(),
+      '已自动移除 Gemini CLI 扩展',
+      'Gemini CLI extension removed automatically',
+      '切到 standby 前无法自动移除 Gemini CLI 扩展，请先手动执行: gemini extensions uninstall helloagents',
+      'Could not remove the Gemini CLI extension before switching to standby. Run manually: gemini extensions uninstall helloagents',
+    ),
+    'global',
+  )
+}
+
+function installHostStandby(runtime, host, { previousMode = '' } = {}) {
   if (host === 'claude') {
+    const cleanupResult = prepareClaudeStandby(previousMode)
+    if (cleanupResult.ok === false) return cleanupResult
     installClaudeStandby(runtime.home, runtime.pkgRoot)
-    return {}
+    return cleanupResult
   }
   if (host === 'gemini') {
+    const cleanupResult = prepareGeminiStandby(previousMode)
+    if (cleanupResult.ok === false) return cleanupResult
     installGeminiStandby(runtime.home, runtime.pkgRoot)
-    return {}
+    return cleanupResult
   }
   if (!installCodexStandby(runtime.home, runtime.pkgRoot)) return { skipped: true }
   cleanupCodexGlobalResidueForStandby(runtime.home)
@@ -103,18 +178,18 @@ function installHostGlobal(runtime, host) {
       installClaudeGlobalPlugin(),
       '已自动安装 Claude Code 插件；重启 Claude Code 后生效',
       'Claude Code plugin installed automatically; restart Claude Code to apply',
-      'Claude Code 插件自动安装失败，请在 Claude Code 中执行: /plugin marketplace add hellowind777/helloagents；/plugin install helloagents@helloagents',
-      'Claude Code plugin auto-install failed. Run inside Claude Code: /plugin marketplace add hellowind777/helloagents; /plugin install helloagents@helloagents',
+      'Claude Code 插件自动安装失败，请在 Claude Code 中执行: /plugin marketplace add https://github.com/hellowind777/helloagents.git；/plugin install helloagents@helloagents',
+      'Claude Code plugin auto-install failed. Run inside Claude Code: /plugin marketplace add https://github.com/hellowind777/helloagents.git; /plugin install helloagents@helloagents',
     )
   }
   if (host === 'gemini') {
     uninstallGeminiStandby(runtime.home)
     return buildNativeResult(
-      installGeminiGlobalExtension(),
+      installGeminiGlobalExtension(runtime.pkgRoot),
       '已自动安装 Gemini CLI 扩展；重启 Gemini CLI 后生效',
       'Gemini CLI extension installed automatically; restart Gemini CLI to apply',
-      'Gemini CLI 扩展自动安装失败，请手动执行: gemini extensions install https://github.com/hellowind777/helloagents',
-      'Gemini CLI extension auto-install failed. Run manually: gemini extensions install https://github.com/hellowind777/helloagents',
+      `Gemini CLI 扩展自动安装失败，请手动执行: gemini extensions link ${runtime.pkgRoot}`,
+      `Gemini CLI extension auto-install failed. Run manually: gemini extensions link ${runtime.pkgRoot}`,
     )
   }
   uninstallCodexStandby(runtime.home)
@@ -132,41 +207,41 @@ function cleanupHostStandby(runtime, host) {
 function cleanupHostGlobal(runtime, host) {
   if (host === 'claude') {
     uninstallClaudeStandby(runtime.home)
-    return buildNativeResult(
-      removeClaudeGlobalPlugin(),
-      '已自动移除 Claude Code 插件',
-      'Claude Code plugin removed automatically',
-      'Claude Code 插件自动移除失败，请手动执行: /plugin remove helloagents',
-      'Claude Code plugin auto-remove failed. Run manually: /plugin remove helloagents',
+    return preserveTrackedModeOnFailure(
+      buildNativeResult(
+        removeClaudeGlobalPlugin(),
+        '已自动移除 Claude Code 插件',
+        'Claude Code plugin removed automatically',
+        'Claude Code 插件自动移除失败，请手动执行: /plugin remove helloagents',
+        'Claude Code plugin auto-remove failed. Run manually: /plugin remove helloagents',
+      ),
+      'global',
     )
   }
   if (host === 'gemini') {
     uninstallGeminiStandby(runtime.home)
-    return buildNativeResult(
-      removeGeminiGlobalExtension(),
-      '已自动移除 Gemini CLI 扩展',
-      'Gemini CLI extension removed automatically',
-      'Gemini CLI 扩展自动移除失败，请手动执行: gemini extensions uninstall helloagents',
-      'Gemini CLI extension auto-remove failed. Run manually: gemini extensions uninstall helloagents',
+    return preserveTrackedModeOnFailure(
+      buildNativeResult(
+        removeGeminiGlobalExtension(),
+        '已自动移除 Gemini CLI 扩展',
+        'Gemini CLI extension removed automatically',
+        'Gemini CLI 扩展自动移除失败，请手动执行: gemini extensions uninstall helloagents',
+        'Gemini CLI extension auto-remove failed. Run manually: gemini extensions uninstall helloagents',
+      ),
+      'global',
     )
   }
   return { skipped: !uninstallCodexGlobal(runtime.home) }
 }
 
-function installStandby(runtime) {
+function installStandby(runtime, previousModes = {}) {
   const results = {}
-  if (installClaudeStandby(runtime.home, runtime.pkgRoot)) {
-    runtime.ok(runtime.msg('Claude Code 已配置（standby 模式）', 'Claude Code configured (standby mode)'))
-    results.claude = {}
-  } else {
-    results.claude = { skipped: true }
-  }
-  if (installGeminiStandby(runtime.home, runtime.pkgRoot)) {
-    runtime.ok(runtime.msg('Gemini CLI 已配置（standby 模式）', 'Gemini CLI configured (standby mode)'))
-    results.gemini = {}
-  } else {
-    results.gemini = { skipped: true }
-  }
+  const claudeResult = installHostStandby(runtime, 'claude', { previousMode: previousModes.claude || '' })
+  reportHostAction(runtime, 'install', 'claude', 'standby', claudeResult)
+  results.claude = claudeResult.skipped ? { skipped: true } : claudeResult
+  const geminiResult = installHostStandby(runtime, 'gemini', { previousMode: previousModes.gemini || '' })
+  reportHostAction(runtime, 'install', 'gemini', 'standby', geminiResult)
+  results.gemini = geminiResult.skipped ? { skipped: true } : geminiResult
   if (installCodexStandby(runtime.home, runtime.pkgRoot)) {
     cleanupCodexGlobalResidueForStandby(runtime.home)
     runtime.ok(runtime.msg('Codex CLI 已配置（standby 模式）', 'Codex CLI configured (standby mode)'))
@@ -188,9 +263,9 @@ function installGlobal(runtime) {
   return results
 }
 
-export function installAllHosts(runtime, mode) {
+export function installAllHosts(runtime, mode, { previousModes = {} } = {}) {
   if (mode === 'global') return installGlobal(runtime)
-  return installStandby(runtime)
+  return installStandby(runtime, previousModes)
 }
 
 export function uninstallAllHosts(runtime) {
@@ -200,10 +275,10 @@ export function uninstallAllHosts(runtime) {
   uninstallCodexGlobal(runtime.home)
 }
 
-export function runHostLifecycle(runtime, action, host, mode) {
+export function runHostLifecycle(runtime, action, host, mode, options = {}) {
   const result = (action === 'cleanup' || action === 'uninstall')
     ? (mode === 'global' ? cleanupHostGlobal(runtime, host) : cleanupHostStandby(runtime, host))
-    : (mode === 'global' ? installHostGlobal(runtime, host) : installHostStandby(runtime, host))
+    : (mode === 'global' ? installHostGlobal(runtime, host) : installHostStandby(runtime, host, options))
 
   reportHostAction(runtime, action, host, mode, result)
   return result

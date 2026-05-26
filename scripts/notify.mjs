@@ -42,7 +42,7 @@ const EVENT_NAME = {
   UserPromptSubmit: IS_GEMINI ? 'BeforeAgent' : 'UserPromptSubmit',
   PreCompact: IS_GEMINI ? 'BeforeAgent' : 'PreCompact',
 };
-const RALPH_LOOP_ROUTE_COMMANDS = new Set(['verify', 'loop']);
+const RALPH_LOOP_ROUTE_COMMANDS = new Set(['qa', 'loop']);
 const CODEX_HOOKS_FILE = join(homedir(), '.codex', 'hooks.json');
 const GATE_MODULE_LOADERS = {
   'turn-stop-gate': () => import('./turn-stop-gate.mjs'),
@@ -87,6 +87,59 @@ function buildNotifyExtra(payload = {}, options = {}) {
 
 function getSettings() {
   return readSettings(CONFIG_FILE);
+}
+
+function hasTruthyAgentFlag(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'subagent'].includes(normalized);
+}
+
+function hasNonEmptyValue(value) {
+  return String(value || '').trim().length > 0;
+}
+
+function looksLikeCodexDelegatedTurn(payload = {}) {
+  if (!IS_CODEX || !payload || typeof payload !== 'object') return false;
+  const client = String(payload.client || '').trim();
+  const inputMessages = Array.isArray(payload.inputMessages) ? payload.inputMessages : [];
+  return !client && inputMessages.length > 1;
+}
+
+function isSubagentPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return false;
+
+  if ([payload.isSubagent, payload.subagent].some(hasTruthyAgentFlag)) {
+    return true;
+  }
+
+  const roleLike = [
+    payload.role,
+    payload.agentRole,
+    payload.agent_role,
+    payload.agentKind,
+    payload.agent_kind,
+    payload.kind,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (roleLike.some((value) => ['subagent', 'delegate', 'delegated', 'worker', 'explorer'].includes(value))) {
+    return true;
+  }
+
+  if ([
+    payload.parentAgentId,
+    payload.parent_agent_id,
+    payload.parentTurnId,
+    payload.parent_turn_id,
+    payload.delegatedByAgentId,
+    payload.delegated_by_agent_id,
+  ].some(hasNonEmptyValue)) {
+    return true;
+  }
+
+  return looksLikeCodexDelegatedTurn(payload);
 }
 
 function shouldRunRalphLoop(cwd, turnState, payload = {}) {
@@ -244,9 +297,24 @@ async function runRalphLoop(payload, { turnState } = {}) {
     blockEvent: 'verify_gate_blocked',
     exportName: 'evaluateRalphLoop',
     evaluateArgs: [payload, {
-      isSubagent: false,
+      isSubagent: isSubagentPayload(payload),
       isGemini: IS_GEMINI,
       hookEventName: HOST === 'codex' ? 'Stop' : (IS_GEMINI ? 'SessionEnd' : 'Stop'),
+    }],
+  });
+}
+
+async function runCodexSubagentGate(payload) {
+  if (!IS_CODEX || !isSubagentPayload(payload)) return false;
+  return await runInlineGate({
+    payload,
+    source: 'ralph-loop',
+    blockEvent: 'verify_gate_blocked',
+    exportName: 'evaluateRalphLoop',
+    evaluateArgs: [payload, {
+      isSubagent: true,
+      isGemini: false,
+      hookEventName: 'Stop',
     }],
   });
 }
@@ -295,6 +363,10 @@ function attachTurnSession(payload = {}, cwd = payload.cwd || process.cwd()) {
     allowPpidFallback: !isProjectRuntimeActive(cwd),
   });
   if (!sessionId || payload.sessionId) return payload;
+  const aliasSource = String(process.env.HELLOAGENTS_NOTIFY_SESSION_ID || process.env.WT_SESSION || process.env.TERM_SESSION_ID || process.env.WINDOWID || '').trim();
+  if (aliasSource) {
+    return { ...payload, sessionId, _helloagentsSessionAlias: aliasSource };
+  }
   return { ...payload, sessionId };
 }
 
@@ -411,6 +483,7 @@ function cmdInject() {
   const cwd = payload.cwd || process.cwd();
   const settings = getSettings();
   const bootstrapFile = resolveBootstrapFile(cwd, settings, HOST);
+  const shouldEnsureProjectLocal = isProjectRuntimeActive(cwd);
 
   startReplaySession(cwd, {
     host: HOST,
@@ -418,6 +491,7 @@ function cmdInject() {
     bootstrapFile,
     installMode: settings.install_mode || '',
     payload,
+    ensureProjectLocal: shouldEnsureProjectLocal,
   });
   if (!IS_SILENT) {
     appendReplayEvent(cwd, {
@@ -433,7 +507,10 @@ function cmdInject() {
     });
   }
   clearRouteContext({ cwd, payload });
-  clearTurnState(cwd, { payload });
+  clearTurnState(cwd, {
+    payload,
+    ensureProjectLocal: shouldEnsureProjectLocal,
+  });
   cleanupProjectSessions(cwd, {
     minIntervalMs: IS_SILENT ? PROJECT_SESSION_CLEANUP_COOLDOWN_MS : 0,
   });
@@ -462,6 +539,11 @@ async function cmdStop() {
   const payload = readPayloadFromStdin();
   const cwd = payload.cwd || process.cwd();
   const turnPayload = attachTurnSession(payload, cwd);
+  if (await runCodexSubagentGate(turnPayload)) return;
+  if (IS_CODEX && isSubagentPayload(turnPayload)) {
+    emptySuppress();
+    return;
+  }
   const turnState = readMainTurnState(cwd, turnPayload);
   const managedCodexStopHook = IS_CODEX && hasManagedCodexStopHook();
   const skipCompleteNotify = managedCodexStopHook && hasCodexQuickNotifyEvidence(cwd, {
@@ -519,7 +601,10 @@ async function cmdCodexNotify() {
     return;
   }
   if (type !== 'agent-turn-complete') return;
-  if (hasManagedCodexStopHook()) {
+  const managedCodexStopHook = hasManagedCodexStopHook();
+  if (managedCodexStopHook && !String(turnPayload.client || '').trim()) return;
+  if (isSubagentPayload(turnPayload)) return;
+  if (managedCodexStopHook) {
     const turnState = readMainTurnState(cwd, turnPayload);
     if (shouldEmitManagedCodexCompleteNotify(cwd, turnState, turnPayload)) {
       notifyByLevel('complete', buildNotifyExtra(data), getSettings(), { mode: 'blocking' });
