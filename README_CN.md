@@ -8,12 +8,13 @@
 
 **面向 AI 编码 CLI 的工作流层：技能、知识库、交付检查、更安全的配置写入，以及可恢复的执行流程。**
 
-[![Version](https://img.shields.io/badge/version-3.0.39-orange.svg)](./package.json)
+[![Version](https://img.shields.io/badge/version-3.1.5-orange.svg)](./package.json)
 [![npm](https://img.shields.io/npm/v/helloagents.svg)](https://www.npmjs.com/package/helloagents)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](./package.json)
 [![Skills](https://img.shields.io/badge/skills-14-6366f1.svg)](./skills)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/hellowind777/helloagents/issues)
+[![LINUX DO](https://img.shields.io/badge/LINUX_DO-%E9%93%BE%E6%8E%A5%E8%AE%A4%E5%8F%AF-0A84FF?logo=linux&logoColor=white)](https://linux.do)
 
 </div>
 
@@ -21,11 +22,12 @@
   <a href="./README.md"><img src="https://img.shields.io/badge/English-blue?style=for-the-badge" alt="English"></a>
   <a href="./README_CN.md"><img src="https://img.shields.io/badge/简体中文-blue?style=for-the-badge" alt="简体中文"></a>
 </p>
-
 ---
 
 > [!IMPORTANT]
 > 如果你在找 `v2.x`，旧的 Python 版本已经迁到 [helloagents-archive](https://github.com/hellowind777/helloagents-archive)。`v3` 是基于 Node.js、Markdown 规则、skills 和轻量运行时脚本的完全重写版本。
+
+> 🏅 此项目已链接认可 [LINUX DO](https://linux.do) 社区。
 
 ## 目录
 
@@ -45,9 +47,9 @@
 
 ## HelloAGENTS 做什么
 
-AI 编码 CLI 写代码很快，但也容易停在建议、跳过检查、丢失项目上下文，或在真正完成前就报告完成。
+AI 编码 CLI 写代码很快，但也容易停在建议、跳过检查、丢失项目上下文、遇到困难推卸责任，或在真正完成前就报告完成。
 
-HelloAGENTS 叠加在 Claude Code、Gemini CLI 和 Codex CLI 之上，帮助模型选择合适流程、使用任务相关的质量技能、维护项目知识库，并在交付前完成验证。
+HelloAGENTS 叠加在 Claude Code、Gemini CLI 和 Codex CLI 之上，将模型锚定为高能力执行者，阻断推责模式，帮助模型选择合适流程、使用任务相关的质量技能、维护项目知识库，并在交付前完成验证。
 
 <table>
 <tr>
@@ -71,6 +73,7 @@ HelloAGENTS 叠加在 Claude Code、Gemini CLI 和 Codex CLI 之上，帮助模�
 | 问题 | 没有 HelloAGENTS | 使用 HelloAGENTS |
 |------|------------------|------------------|
 | 结束过早 | 停在建议 | 继续实现、验证和收尾 |
+| 模型推责 | 拒绝难任务，建议换工具/模型 | 穷尽替代路径，持续执行到底 |
 | 质量不稳定 | 很依赖提示词 | 按任务类型激活 14 个质量技能 |
 | 上下文分散 | 方案散落在聊天记录里 | 项目知识和方案文件落在磁盘上 |
 | 完成态模糊 | 自然语言说“完成” | 按状态、证据和验证结果交付 |
@@ -110,6 +113,7 @@ HelloAGENTS 内置 14 个技能。技能只在当前阶段需要时读取，因�
 | 命令 | 用途 |
 |------|------|
 | `~idea` | 轻量探索和方向比较；不写文件 |
+| `~office` | 价值与范围评估；先判断该不该做、该做多大、先做哪一小块 |
 | `~auto` | 自动选择主路径，并持续推进到交付或真实阻塞 |
 | `~plan` | 需求、方案、任务拆分和方案包 |
 | `~build` | 按当前请求或现有方案实现 |
@@ -128,6 +132,8 @@ HelloAGENTS 内置 14 个技能。技能只在当前阶段需要时读取，因�
 - `~design` → `~plan`
 - `~review` → `~qa`
 
+`~idea` 适合比较几种方向；`~office` 适合先判断这件事值不值得做、要不要做这么大，以及最小切口应该落在哪里。
+
 ### 3）项目知识库
 
 HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
@@ -145,7 +151,7 @@ HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
 | `plans/<feature>/` | 活跃方案包 |
 | `archive/` | 已归档方案包 |
 
-`~init` 用来初始化项目工作流：写入项目级 full carrier 标记、准备项目状态，并创建或更新知识库。
+`~init` 用来初始化项目工作流：写入项目级 `HELLOAGENTS_PROFILE: full` 标记、准备项目状态，并创建或更新知识库。
 
 ### 4）结构化方案包
 
@@ -174,7 +180,7 @@ HelloAGENTS 可以在 `.helloagents/` 下创建和维护项目知识库。
 - `prd/11-legal-privacy.md`
 - `prd/12-timeline.md`
 
-`contract.json` 会影响验证范围、reviewer/tester 关注点、可选 advisor 检查和可选视觉验收。
+`contract.json` 会影响 `qaMode`、`qaFocus`、可选 advisor 检查和可选视觉验收。
 
 `tasks.md` 还会保留 Codex `/goal` 执行入口。长程 Codex 任务应使用这个已拆分入口，不要把原始产品文档直接交给 `/goal`。默认链路是 `/goal -> ~auto -> ~qa`：`/goal` 负责长程续跑，`~auto` 负责执行 AFK 任务，`~qa` 负责最终质量闭环与收尾前验收。
 
@@ -214,7 +220,7 @@ HelloAGENTS 不把“命令通过”和“任务完成”简单画等号。交�
 
 标准运行态证据和临时运行态现在默认 72 小时过期。只有工作流明确需要的长程 Codex goal 链路，才继续保留 720 小时上限。
 
-交付门控、守卫和 QA gate 提示使用执行性表述，例如处理路径、收尾动作和视觉验收动作。阻塞流程会说明下一步要做什么，而不是把可执行步骤写成泛化建议。最终回复还会强制只保留一个 HelloAGENTS 外层块，避免同一条回复重复输出完成标题。
+交付门控、守卫和 QA 门禁提示使用执行性表述，例如处理路径、收尾动作和视觉验收动作。阻塞流程会说明下一步要做什么，而不是把可执行步骤写成泛化建议。最终回复还会强制只保留一个 HelloAGENTS 外层块，避免同一条回复重复输出完成标题。
 这个外层格式现在只保留给直接面向最终用户的终局交付。中间汇报、委派任务结果和子代理回复都保持自然输出；子代理结束钩子也会拦截错误的外层收尾格式。
 
 ### 7）更安全的安装、更新、清理和诊断
@@ -225,8 +231,12 @@ CLI 显式管理宿主文件：
 - `update` 刷新指定目标或全部目标
 - `cleanup` 删除受管注入和链接
 - `uninstall` 在移除包前执行对应清理
-- `doctor` 检查规则文件、链接、hooks、配置项、插件根目录、缓存副本和版本漂移；对 Codex 还会在可用时附带原生 `codex doctor` 结果
+- `doctor` 检查规则文件、链接、hooks、配置项、插件根目录、缓存副本、版本漂移，以及 Claude / Gemini 是否真的装上了全局插件或扩展；对 Codex 还会在可用时附带原生 `codex doctor` 结果
+- Codex 受管 `notify = ["helloagents-js", "codex-notify"]` 会继续保持可移植；`doctor`、`cleanup` 和 `uninstall` 也能识别 Codex App / Computer Use 使用的 `--previous-notify` 包装链
 - 单 CLI 模式记录只会在宿主安装成功后写入；如果原生全局清理失败，也会继续保留 `global` 记录，而不是悄悄叠加 standby
+- 直接执行 `switch-branch` 时，会先清掉陈旧的 `HELLOAGENTS*` 生命周期环境变量；包级 `preuninstall` 在没有显式宿主参数时固定回退到 `--all`，避免残留 shell 环境把切分支或卸载清理错误缩窄到旧目标
+- Windows 下的 `.cmd` / `.bat` 生命周期调用现在统一走显式命令包装，不再出现 Node `DEP0190` shell 弃用警告
+- Claude Code、Gemini CLI 和 Codex CLI 的配置写入、更新、清理、卸载、模式切换与分支切换，现在按一条完整生命周期链路验证，而不是分散的“尽量覆盖”
 
 ## 快速开始
 
@@ -313,7 +323,7 @@ helloagents codex goals enable
 
 当你不想依赖更新过程中的 `helloagents` 可执行文件时，用 npm 或一键脚本。`HELLOAGENTS=目标[:模式]` 中，目标支持 `all`、`claude`、`gemini`、`codex`；模式支持 `standby`、`global`。用于安装时，省略模式按 `standby` 处理；用于更新、清理、卸载和切换分支时，省略模式会原样下传，让 HelloAGENTS 先复用该 CLI 已记录或检测到的模式。如果未提供 `HELLOAGENTS`，一键安装脚本现在会保持“只装包/只升级包”的默认语义，不会自动部署任何宿主 CLI。若要安装自定义 tarball 或包规格，用 `HELLOAGENTS_PACKAGE`，不要写 `HELLOAGENTS_BRANCH`。对于已经装好的包，如需确保宿主一定刷新，优先在包命令后显式执行一次 `npm explore -g helloagents -- npm run sync-hosts -- ...`。
 
-宿主配置使用稳定的 `helloagents-js` 入口和运行根目录 `~/.helloagents/helloagents`，Node 全局包路径变化不会破坏受管 hooks 或 Codex `notify`。Codex hooks 使用独立 `~/.codex/hooks.json`，不把大段配置写入 `config.toml`；Codex 全局插件根目录和插件缓存也会回链到这个稳定运行根目录。
+宿主配置使用稳定的 `helloagents-js` 入口和运行根目录 `~/.helloagents/helloagents`，Node 全局包路径变化不会破坏受管 hooks 或 Codex `notify`。Codex hooks 使用独立 `~/.codex/hooks.json`，不把大段配置写入 `config.toml`；Codex 全局插件根目录和插件缓存也会回链到这个稳定运行根目录。Claude Code 的 global 安装现在使用独立本地 marketplace 投影 `~/.helloagents/host-projections/claude-marketplace`，Gemini 的 global 扩展使用 `~/.helloagents/host-projections/gemini`，宿主专用打包链路不再污染共享运行根。
 
 #### npm 命令
 
@@ -424,6 +434,8 @@ helloagents switch-branch beta claude --global
 helloagents branch beta --all --standby
 ```
 
+直接执行 `helloagents switch-branch ...` 时，也会在内部 npm 安装和宿主同步之前先清理陈旧的 `HELLOAGENTS*` 生命周期环境变量。
+
 如果只想切换包本身，暂不同步宿主 CLI，可以直接使用 npm：
 
 ```bash
@@ -445,16 +457,16 @@ npm uninstall -g helloagents
 
 | CLI | 安装方式 | 涉及文件 |
 |-----|----------|----------|
-| Claude Code | 原生插件安装 | 由 Claude Code 插件系统管理 |
-| Gemini CLI | 原生扩展安装 | 由 Gemini 扩展系统管理 |
+| Claude Code | 原生插件安装 | `~/.helloagents/host-projections/claude-marketplace`，以及由 Claude Code 宿主管理的插件元数据 / 缓存 |
+| Gemini CLI | 原生扩展安装 | `~/.helloagents/host-projections/gemini`、`~/.gemini/extensions/helloagents` |
 | Codex CLI | 原生本地插件流程 | `~/.agents/plugins/marketplace.json`、`~/plugins/helloagents/ -> ~/.helloagents/helloagents`、`~/.codex/plugins/cache/local-plugins/helloagents/local/ -> ~/.helloagents/helloagents`、`~/.codex/config.toml`、`~/.codex/hooks.json`、`~/.codex/helloagents -> ~/.helloagents/helloagents` |
 
-全局模式下，HelloAGENTS 会自动尝试宿主原生命令。对 Claude Code，marketplace 应使用 Git URL 添加，这样插件安装阶段会继续走 HTTPS，不会落回 SSH-only clone。若宿主命令不可用，再手动执行：
+全局模式下，HelloAGENTS 会自动尝试宿主原生命令。Claude Code 走本地 marketplace 投影，Gemini 走本地 extension 投影，Codex 继续回链同一个稳定运行根，因此安装、更新、切分支、切模式、清理和卸载都会围绕同一份运行时副本刷新。若宿主命令不可用，再手动执行：
 
 ```text
-/plugin marketplace add https://github.com/hellowind777/helloagents.git
+/plugin marketplace add "~/.helloagents/host-projections/claude-marketplace"
 /plugin install helloagents@helloagents
-helloagents install gemini --global
+gemini extensions link "~/.helloagents/host-projections/gemini"
 ```
 
 Claude Code 会自动尝试等价的 `claude plugin marketplace add ...` 和 `claude plugin install ...` 命令。marketplace 名称和插件名称都是 `helloagents`，所以安装目标是 `helloagents@helloagents`。全局安装后需要重启宿主 CLI。
@@ -470,6 +482,7 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 | 目标 | 使用 |
 |------|------|
 | 写文件前先比较方案 | `~idea "compare two API designs"` |
+| 先判断值不值得做、要不要做这么大 | `~office "should this become a full platform or just a thin wedge?"` |
 | 让 HelloAGENTS 自己选路并持续推进 | `~auto "add JWT login"` |
 | 先审查方案再实现 | `~plan "refactor payment module"` |
 | 按明确请求或活跃方案实现 | `~build "finish task 2 in the plan"` |
@@ -544,17 +557,19 @@ Codex 全局模式由 HelloAGENTS 通过本地插件路径自动安装。
 结构化任务使用以下阶段：
 
 ```text
-ROUTE / TIER → SPEC → PLAN → BUILD → QA → CONSOLIDATE
+选路与分层 → 目标澄清 → 规划 → 实现 → 质量闭环 → 收尾与归档
 ```
 
 | 阶段 | 用途 |
 |------|------|
-| `ROUTE / TIER` | 判断任务应走 idea、plan、build、verify、PRD 还是自动流程 |
-| `SPEC` | 明确目标、约束和完成标准 |
-| `PLAN` | 准备方案文件并选择需要的技能 |
-| `BUILD` | 实现并做局部检查 |
-| `QA` | 审查、运行命令、核对契约和证据 |
-| `CONSOLIDATE` | 更新状态、知识库和收尾证据 |
+| 选路与分层 | 判断任务应走 `~idea`、`~plan`、`~build`、`~qa`、`~prd` 还是自动流程 |
+| 目标澄清 | 明确目标、约束和完成标准 |
+| 规划 | 准备方案文件并选择需要的技能 |
+| 实现 | 实现并做局部检查 |
+| 质量闭环 | 审查、运行命令、核对契约和证据 |
+| 收尾与归档 | 更新状态、知识库和收尾证据 |
+
+HelloAGENTS 还在 `bootstrap.md` / `bootstrap-lite.md` 这层默认启用一组常驻核心规则：将模型锚定为受信任环境中的高能力执行者，阻断向用户或其他工具推责的模式，强制穷尽替代路径后方可声明阻塞；涉及判断与取舍时先区分真实约束与内部惯性；若被当前实现、旧命名、旧目录、半成品结构或兼容压力拖住，先从终局状态或零遗留视角重看目标；若答案仍被兼容性崇拜、局部细节、重构恐惧或温和偏差拖小，必须补首个证明点、证伪条件与止损规则。用户可见文本默认只使用当前回复语言，除代码标识、命令、文件名、目录名、路径、标记名、配置键和必要专名外，避免中英文混杂。
 
 ### 任务分层
 
@@ -656,13 +671,14 @@ Codex 默认走规则文件驱动。
 
 - 标准模式写入 `~/.codex/AGENTS.md`
 - 标准模式写入可移植的受管 `model_instructions_file = "~/.codex/AGENTS.md"`
-- 标准模式写入受管 `notify = ["helloagents-js", "codex-notify"]` 命令用于收尾通知
+- 标准模式写入受管且可移植的 `notify = ["helloagents-js", "codex-notify"]` 命令用于收尾通知，因此重装、更新或换电脑时都不需要改写绝对路径
 - 标准模式把静默 Codex hooks 写入 `~/.codex/hooks.json`
 - Codex 的 `SessionStart` 保持静默，并在运行时读取当前 `~/.helloagents/helloagents.json`，不会把配置快照固化进 `config.toml`，因此首次对话和上下文压缩后的设置都能保持最新
 - 安装和更新还会把 HelloAGENTS 受管的 Codex hook trust 状态同步到 `~/.codex/config.toml`，因此 Codex 0.129.0+ 不会再对这些受管 hooks 反复提示确认
 - 这些 hook trust 状态是基于当前机器 `~/.codex/hooks.json` 真实绝对路径生成的本机状态；它不同于 `model_instructions_file = "~/.codex/AGENTS.md"` 这类可移植配置，应在每台机器上重新生成
 - 标准模式创建 `~/.codex/helloagents -> ~/.helloagents/helloagents`
 - 全局模式安装原生本地插件流程，但仍把 `~/.helloagents/helloagents` 作为唯一受管运行时源；插件根目录、插件缓存和 `~/.codex/helloagents` 都会回链到它
+- `doctor`、`cleanup` 和 `uninstall` 也能识别 `--previous-notify ["helloagents-js", "codex-notify"]` 这类包装后的 notify 链，因此 Codex App / Computer Use 不会再触发误报或破坏 notify 恢复
 - 如果你主要看重 Codex app / 插件发现链路，优先使用 `global`；如果你主要看重更轻量、更显式的项目工作流，保留 `standby`
 - 清理时只删除 HelloAGENTS 自己写入的 hook trust 条目，不影响用户已有的 hook 状态
 - Codex hooks 只做静默运行态同步和 Stop 门禁，不通过 hook 注入 HelloAGENTS 规则或路由说明
@@ -682,15 +698,18 @@ npm test
 当前测试覆盖：
 
 - 安装、更新、清理、卸载、分支切换和模式切换
+- 直接 `switch-branch` 与包级 `preuninstall` 的陈旧生命周期环境变量防护
+- Windows `.cmd` / `.bat` 生命周期分发链路，且不再出现 Node `DEP0190` 警告
 - shell 与 PowerShell 一键脚本分发链路，以及包装脚本在安装、更新、清理、卸载和分支切换中的环境清理与模式传递规则
 - Claude、Gemini、Codex 的宿主集成行为，包括全局切回标准模式的清理和原生清理失败时的模式保留
 - Codex 受管 `model_instructions_file`、`notify`、`hooks.json`、hook trust 状态、本地插件、marketplace 和缓存行为
-- Codex 清理链路，以及受管 notify 恢复规则
+- Codex 清理链路，以及包括 wrapped `--previous-notify` 在内的受管 notify 恢复规则
 - Codex `/goal` 功能开关、长程路由上下文和 goal 感知命令契约
 - `helloagents doctor`
 - 项目存储和 `repo-shared`
 - 工作区+会话级 `state_path`、运行态信号和证据
 - 运行时注入、选路、Guard、验证、视觉证据、交付门控、收尾去重、子代理外层格式与通知静默保护，以及原生安装失败后的模式记录
+- Claude Code、Gemini CLI、Codex CLI 的宿主配置写入、更新、清理、卸载、模式切换和分支切换整链路
 - README 与 skill 契约一致性
 
 ## FAQ
