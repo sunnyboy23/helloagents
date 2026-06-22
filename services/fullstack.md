@@ -153,8 +153,47 @@
   2. 更新指定任务状态
   3. 重新计算进度
   4. 检查是否触发下游任务
-  5. 写入状态文件
+  5. 任务 completed 时自动重算已就绪下游任务的契约（见 renegotiateDownstream）
+  6. 写入状态文件
 返回: { success, progress, triggered_tasks[] }
+```
+
+### renegotiateDownstream(taskGroupId)
+
+```yaml
+触发: 任意任务 completed 后自动执行（也可独立调用）
+目的: 用上游真实产出替换下游任务的静态初始契约，避免下游按过期假设开发
+流程:
+  1. 找出所有依赖均已 completed/skipped 的未完成下游任务
+  2. 从上游 ResultMessage 提取真实 api_contract / tech_docs / changes
+  3. 重算下游 task_contract:
+     - upstream_contracts 注入上游真实契约路径
+     - 上游有接口变化 → verify_mode 升 integration_ready、risk_level 升 high、补联调关注点
+  4. 写 contract_renegotiated 事件 + 下游项目本地投影
+返回: updates[]（每条含 task_id / task_contract / changelog）
+```
+
+### auditDispatch(taskGroupId)
+
+```yaml
+触发: 收尾前校验派发完整性
+目的: 识别"未真实派发就标记完成"的伪完成任务，杜绝主代理自行模拟实现
+判定: 任务 completed/partial 但既无 task_started 事件、也无 handoff 交付文件 → fabricated
+返回: { total, dispatched_count, not_dispatched[], fabricated_completions[], all_dispatched, has_fabricated }
+约束: has_fabricated=true 时禁止报告 fullstack 完成（fullstack gate 同步拦截）
+```
+
+### buildConfigSuggestions(projectPaths)
+
+```yaml
+触发: 影响分析前的配置建议预检
+目的: 降低 service_catalog 语义字段与跨服务依赖的人工维护成本
+流程:
+  1. Maven/Node 构建依赖反推 service_dependencies
+  2. 配置文件/源码中的 SCF/RPC/HTTP 引用反推跨语言依赖边（构建扫描看不到的部分）
+  3. README/AGENTS 推断 service_catalog 语义字段
+  4. 产出建议 diff（默认不改配置），--apply 时只填充缺失/自动生成字段
+返回: { dependency_additions[], dependency_evidence{}, catalog_changes[], has_suggestions, suggested_* }
 ```
 
 ---
@@ -331,8 +370,22 @@ artifact_lifecycle:
   - verification 无阻断项
   - closeout 无阻断项
   - artifact_status.missing 为空
+  - dispatch-audit 的 fabricated_completions 为空（无未真实派发就标记完成的任务）
 
 否则:
-  - 输出缺失产物清单
-  - 保持 next_step 指向“补齐 fullstack 必需产物”
+  - 输出缺失产物清单 / 伪完成任务清单
+  - 保持 next_step 指向”补齐 fullstack 必需产物”或”真实派发对应子代理”
+```
+
+## 过程数据记录口径（项目本地为准）
+
+```yaml
+全局 runtime: 只存跨项目编排事实（current.json、全局 events/errors、summary）
+项目本地 {目标项目}/.helloagents/fullstack/: 存该工程师任务执行事实（inbox/state/events/errors/handoff）
+落盘时机: create / start / complete / 契约重算时由 task store 自动写入对应项目本地目录
+判断依据:
+  - 编排层”整体到哪一步” → 全局 runtime
+  - 单项目”任务做了什么、验证收尾齐没齐” → 该项目本地 fullstack 目录
+禁止: 把所有工程师的任务、状态、交付记录只写在发起项目下
+理由: 每个项目可独立恢复、独立接手，工程师子代理在自己项目内留下完整轨迹
 ```

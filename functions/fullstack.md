@@ -96,6 +96,36 @@ helloagents fullstack impact '{受影响项目路径1}' '{受影响项目路径2
 - dispatch_plan.continue_execution: 是否继续执行（有可派发项目即 true）
 - dispatch_plan.warnings: 非阻断告警（含补绑建议）
 
+### 3.5 配置建议预检（扩展配置自动化）
+
+`service_catalog` 的语义字段和跨语言服务依赖无法只靠构建文件推断，过去只能人工维护。`config-suggest` 在每次影响分析前给出一份**配置建议 diff**（不直接改配置），覆盖：
+
+- Maven/Node 构建依赖反推的 `service_dependencies`
+- 配置文件/源码中的 SCF/RPC/HTTP 跨语言服务引用反推的依赖边（构建依赖扫描看不到的部分）
+- 从 README/AGENTS 推断的 `service_catalog` 语义字段填充建议
+
+```bash
+# 仅产出建议 diff（默认不改配置）
+helloagents fullstack config-suggest
+
+# 审阅后一次性写入配置
+helloagents fullstack config-suggest --apply
+```
+
+输出关键字段:
+
+```yaml
+dependency_additions: 建议新增的依赖边（含 project / depends_on）
+dependency_evidence: 每条跨语言依赖的命中证据（来源文件 + 命中 token）
+catalog_changes: 建议新增/填充的 service_catalog 字段
+has_suggestions: 是否有可应用的建议
+```
+
+使用约束:
+
+- 派发前应先跑一次 `config-suggest`；有 `dependency_additions` 时，先确认或 `--apply`，再做影响分析，避免漏算跨服务依赖
+- `--apply` 只填充缺失/自动生成的字段，不覆盖用户已手写的语义字段
+
 ### ~fullstack dispatch-plan
 
 按“当前已绑定的工程师与项目”生成派发计划（仅派发给存在的职能工程师）:
@@ -185,6 +215,42 @@ warnings: 非阻断告警与补绑建议
 helloagents fullstack kb init '{项目路径}'
 ```
 
+### 5.5 契约协商（让协作不再呆板）
+
+初始 task_contract 是在任务组创建时按静态拓扑一次性算出来的，无法反映上游真实产出。为避免下游工程师按"初始假设"而非"上游最终契约"开发，task store 在上游任务完成时会自动重算下游契约：
+
+```yaml
+触发: 某下游任务的所有依赖任务都已 completed/skipped
+重算来源: 上游 ResultMessage 中真实产出的 api_contract / tech_docs / changes
+重算效果:
+  - 把上游真实契约写入下游 task_contract.upstream_contracts
+  - 上游存在接口变化时，verify_mode 升级为 integration_ready，risk_level 升为 high
+  - 追加"与上游真实契约联调验证""按上游最终契约对齐"等关注点
+落盘: 写 contract_renegotiated 事件 + 下游项目本地投影，contract_renegotiated_at 标记时间
+```
+
+主代理在派发下游任务前，应读取该任务的最新 task_contract（已重算），把真实上游契约作为上下文传给子代理，而不是沿用初始契约。
+
+### 5.6 过程数据记录口径（项目本地为准）
+
+全栈模式下每个职能工程师的过程数据**以目标项目本地为准**，不集中堆在发起对话的项目下：
+
+```yaml
+全局 runtime（FULLSTACK_RUNTIME_ROOT/{project_runtime_key}/...）:
+  职责: 仅保存跨项目编排事实 —— 任务组状态 current.json、全局 events/errors 日志、summary
+  不保存: 各工程师在自己项目里的实现细节
+
+项目本地（{目标项目}/.helloagents/fullstack/...）:
+  职责: 保存该工程师任务的执行事实 —— inbox / state / events / errors / handoff
+  由 task store 在 create / start / complete / 契约重算时自动落盘到对应项目
+  好处: 每个项目可独立恢复、独立接手，工程师子代理在自己项目内留下完整轨迹
+
+判断依据:
+  - 编排层"谁先做、谁后做、整体到哪一步" → 看全局 runtime
+  - 某个项目"这个任务做了什么、验证没有、交付齐没齐" → 看该项目本地 fullstack 目录
+禁止: 把所有工程师的任务、状态、交付记录只写在发起项目下
+```
+
 ### 6. 确认信息
 
 ```yaml
@@ -222,17 +288,26 @@ helloagents fullstack kb init '{项目路径}'
        - fullstack/docs/tasks.md 已存在
        - fullstack/docs/agents.md 已存在
        - fullstack/docs/upstream.md 已存在
-  2. 按 DAG 层级派发:
+  2. 读取派发清单（强制，防止漏派发）:
+     - 调用 `helloagents fullstack dispatch-manifest`
+     - manifest 列出每个任务必须派发的 expected_subagent 和交付回写路径
+     - 对 manifest 中**每一个** dispatchable 任务，都必须真实调用对应职能工程师子代理，不允许主代理自行模拟实现或跳过派发
+  3. 按 DAG 层级派发:
      - 同层任务并行（≤6 并发）
      - 层级间串行等待
-  3. 收集 ResultMessage（包含开发、验证、交付结果）
-  4. 每个任务开始前调用 `start`，收到 ResultMessage 后调用 `feedback`
+     - 每个任务派发前调用 `start`（产生 task_started 事件），子代理完成后写 handoff 交付文件
+  4. 收集 ResultMessage（包含开发、验证、交付结果），收到后调用 `feedback`
+     - 上游任务完成且产出真实 API 契约时，下游任务契约会自动重算（见 3.6 契约协商）
   5. 每层完成后调用 `report`，确保 summary/current_layer/blocked_tasks 持续更新
   6. 更新任务状态（status + verification + closeout + summary）
      - `report` / `status` 必须检查 `artifact_status.missing`
      - 缺少 `fullstack/docs/tasks.md`、`agents.md`、`upstream.md` 时不得报告 fullstack 收尾完成
-  7. 同步技术文档
-  8. 进入任务组收尾
+  7. 派发审计（强制，收尾前）:
+     - 调用 `helloagents fullstack dispatch-audit`
+     - `fabricated_completions` 非空表示存在"未真实派发就标记完成"的伪完成任务
+     - 有伪完成任务时禁止报告 fullstack 完成，必须真实派发后补齐 start 事件与 handoff 记录
+  8. 同步技术文档
+  9. 进入任务组收尾
 ```
 
 运行态命令约束：
@@ -249,6 +324,12 @@ helloagents fullstack feedback '{task_id}' '{status}' '{result_json}'
 
 # 4) 实时报告
 helloagents fullstack report
+
+# 5) 派发清单（每个任务必须真实派发对应子代理）
+helloagents fullstack dispatch-manifest
+
+# 6) 派发审计（收尾前检查是否存在伪完成）
+helloagents fullstack dispatch-audit
 ```
 
 说明：

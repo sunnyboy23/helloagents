@@ -144,6 +144,7 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 - 更新全局进度
 - 校验每个 ResultMessage 是否包含本地运行态更新摘要；缺失时要求工程师补写本地 state/events/errors/handoff
 - 检查 `artifact_status.missing`，缺失时继续推动补文档，不得提前宣告 fullstack 完成
+- 上游完成后，下游任务契约会自动按真实产出重算（contract_renegotiated）；派发下游前读取其最新 task_contract，按上游最终契约传上下文，而非初始假设
 
 ```bash
 # 处理工程师反馈并触发下游任务（Layer 6）
@@ -152,6 +153,22 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 # 输出进度报告（Layer 6）
 HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack report
 ```
+
+### 7. 派发完整性校验（收尾前强制）
+
+收尾前必须确认每个任务都真实派发过，不存在"主代理自己模拟实现 / 直接标完成"的伪完成:
+
+```bash
+# 派发清单：列出每个任务必须派发的 expected_subagent
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack dispatch-manifest
+
+# 派发审计：检查是否存在未真实派发就标记完成的任务
+HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack dispatch-audit
+```
+
+- `dispatch-manifest` 的每个 dispatchable 任务都必须真实调用对应子代理
+- `dispatch-audit` 的 `fabricated_completions` 非空时禁止收尾，必须真实派发并补齐 start 事件 + handoff 交付记录
+- fullstack gate 也会在收尾时独立校验这一点，伪完成会被直接拦截
 
 ## 工程师映射
 

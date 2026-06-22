@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { getApplicableRouteContext } from './runtime-context.mjs'
 import { readTurnState } from './turn-state.mjs'
 import { getCurrentStateFile } from './fullstack-runtime-store.mjs'
+import { auditDispatch } from './fullstack-dispatch.mjs'
 
 function normalizePath(filePath = '') {
   return filePath ? normalize(resolve(filePath)) : ''
@@ -97,6 +98,14 @@ export function inspectFullstackCloseout({ cwd = process.cwd() } = {}) {
   }
   if (!hasFullstackCompletionEvent(state)) {
     issues.push('缺少 fullstack 任务完成/失败/阻塞事件记录。')
+  }
+
+  const dispatchAudit = auditDispatch(state)
+  if (dispatchAudit.has_fabricated) {
+    issues.push(
+      `检测到未真实派发就标记完成的任务（伪完成）：${dispatchAudit.fabricated_completions.join(', ')}。`
+      + '请对这些任务真实派发对应职能工程师子代理，留下 start 事件与 handoff 交付记录后再收尾。',
+    )
   }
 
   return {

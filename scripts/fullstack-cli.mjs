@@ -33,6 +33,8 @@ import { initProjectKb } from './fullstack-kb-init.mjs'
 import { batchSyncFromResult, syncTechDoc, updateUpstreamIndex } from './fullstack-sync.mjs'
 import { TaskStore, loadTaskPayload, resolveStateFileArg } from './fullstack-task-store.mjs'
 import { scanDependencies, scanServiceCatalog } from './fullstack-dep-scan.mjs'
+import { buildConfigSuggestions } from './fullstack-config-advisor.mjs'
+import { auditDispatch, buildDispatchManifest } from './fullstack-dispatch.mjs'
 
 function safeJsonString(value) {
   return `${JSON.stringify(value, null, 2)}\n`
@@ -40,7 +42,7 @@ function safeJsonString(value) {
 
 function printUsage() {
   process.stdout.write([
-    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|cross-deps|scan-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|sync|kb> ...',
+    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|dispatch-manifest|dispatch-audit|config-suggest|cross-deps|scan-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|sync|kb> ...',
     "示例: helloagents fullstack runtime set-root '~/.helloagents/runtime' --create",
     '示例: helloagents fullstack runtime choose-root',
   ].join('\n') + '\n')
@@ -167,9 +169,9 @@ export async function handleFullstackCli(args = []) {
     return Boolean(result.success)
   }
 
-  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'cross-deps', 'scan-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'sync', 'kb'].includes(group)) {
+  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'dispatch-manifest', 'dispatch-audit', 'config-suggest', 'cross-deps', 'scan-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'sync', 'kb'].includes(group)) {
     const configPath = resolveFullstackConfigFile({ projectRoot, kbRoot })
-    const needsConfig = !['create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report'].includes(group)
+    const needsConfig = !['create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'dispatch-manifest', 'dispatch-audit'].includes(group)
     const config = needsConfig ? loadConfig(configPath) : null
     if (needsConfig && config?.error) {
       process.stdout.write(safeJsonString({
@@ -183,7 +185,7 @@ export async function handleFullstackCli(args = []) {
 
     if (needsConfig && config && ['impact', 'dispatch-plan', 'cross-deps', 'ownership'].includes(group)) {
       const allProjects = getAllProjects(config)
-      const paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+      const paths = allProjects.map((p) => p.path).filter(Boolean)
 
       const deps = config.service_dependencies || {}
       const hasDeclaredDeps = Object.keys(deps).some((k) => (deps[k]?.depends_on || []).length > 0)
@@ -273,7 +275,7 @@ export async function handleFullstackCli(args = []) {
           return false
         }
         const allProjects = getAllProjects(config)
-        const paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+        const paths = allProjects.map((p) => p.path).filter(Boolean)
         if (paths.length > 1) {
           const scanResult = scanDependencies(paths)
           if (scanResult.success && Object.keys(scanResult.service_dependencies).length > 0) {
@@ -366,7 +368,7 @@ export async function handleFullstackCli(args = []) {
       let paths = projectPaths
       if (paths.length === 0) {
         const allProjects = getAllProjects(config)
-        paths = (allProjects.projects || []).map((p) => p.path).filter(Boolean)
+        paths = allProjects.map((p) => p.path).filter(Boolean)
         if (paths.length === 0) {
           process.stdout.write(safeJsonString({ success: false, error: 'No bound projects found. Bind projects first.' }))
           return false
@@ -380,6 +382,30 @@ export async function handleFullstackCli(args = []) {
         if (!saved) result.apply_error = saveErr
       }
       process.stdout.write(safeJsonString(result))
+      return true
+    }
+    if (group === 'config-suggest') {
+      const applyFlag = args.includes('--apply')
+      const explicitPaths = args.slice(1).filter((a) => a !== '--apply')
+      let paths = explicitPaths
+      if (paths.length === 0) {
+        paths = getAllProjects(config).map((p) => p.path).filter(Boolean)
+      }
+      if (paths.length === 0) {
+        process.stdout.write(safeJsonString({ success: false, error: 'No bound projects found. Bind projects first.' }))
+        return false
+      }
+      const suggestions = buildConfigSuggestions(config, paths)
+      if (applyFlag && suggestions.has_suggestions) {
+        config.service_dependencies = suggestions.suggested_service_dependencies
+        config.service_catalog = suggestions.suggested_service_catalog
+        const [saved, saveErr] = saveConfig(configPath, config)
+        suggestions.applied = saved
+        if (!saved) suggestions.apply_error = saveErr
+      } else {
+        suggestions.applied = false
+      }
+      process.stdout.write(safeJsonString(suggestions))
       return true
     }
     if (group === 'ownership') {
@@ -499,6 +525,22 @@ export async function handleFullstackCli(args = []) {
       process.stdout.write(safeJsonString(store.getProgressReport()))
       return true
     }
+    if (group === 'dispatch-manifest') {
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      process.stdout.write(safeJsonString({
+        task_group_id: store.state.task_group_id || '',
+        manifest: buildDispatchManifest(store.state),
+      }))
+      return true
+    }
+    if (group === 'dispatch-audit') {
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      const audit = auditDispatch(store.state)
+      process.stdout.write(safeJsonString(audit))
+      return !audit.has_fabricated
+    }
     if (group === 'sync') {
       if (args[1] === 'batch') {
         if (args.length < 3) {
@@ -600,6 +642,9 @@ export async function handleFullstackCli(args = []) {
       'unbind',
       'impact',
       'dispatch-plan',
+      'dispatch-manifest',
+      'dispatch-audit',
+      'config-suggest',
       'cross-deps',
       'scan-deps',
       'ownership',

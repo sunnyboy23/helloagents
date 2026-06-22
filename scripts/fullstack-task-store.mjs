@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { ensureRuntimeDirs, getCurrentStateFile } from './fullstack-runtime-store.mjs'
+import { renegotiateReadyDownstream } from './fullstack-renegotiate.mjs'
 
 export const DEFAULT_FULLSTACK_REQUIRED_ARTIFACTS = [
   {
@@ -724,8 +725,36 @@ export class TaskStore {
         this.writeLocalProjection(downstreamId, 'task_blocked', { blocked_by: taskId })
       }
     })
+    if (status === 'completed') this.renegotiateDownstream()
     this.saveState()
     return true
+  }
+
+  // Re-derive downstream task contracts from real upstream deliverables once
+  // their dependencies complete. Keeps collaboration adaptive instead of using
+  // the one-shot static contract from task-group creation.
+  renegotiateDownstream() {
+    const { updates } = renegotiateReadyDownstream(this.state)
+    updates.forEach((update) => {
+      const task = this.state.tasks?.[update.task_id]
+      if (!task) return
+      task.task_contract = update.task_contract
+      task.contract_renegotiated_at = nowIso()
+      this.writeLocalProjection(update.task_id, 'contract_renegotiated', {
+        changelog: update.changelog,
+        upstream_contracts: update.resolved_upstream_contracts,
+      })
+      appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+        event_type: 'contract_renegotiated',
+        task_group_id: this.state.task_group_id,
+        task_id: update.task_id,
+        engineer_id: task.engineer_id,
+        project: task.project,
+        changelog: update.changelog,
+        occurred_at: nowIso(),
+      })
+    })
+    return updates
   }
 
   failTask(taskId, error) {
