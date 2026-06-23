@@ -17,6 +17,7 @@ function buildTasksPayload(projectRoot) {
         project: join(projectRoot, 'order-service'),
         description: '实现订单规则写入',
         depends_on: [],
+        skip_solution: true,
         task_contract: {
           required_artifacts: ['fullstack/docs/tasks.md'],
         },
@@ -27,6 +28,7 @@ function buildTasksPayload(projectRoot) {
         project: join(projectRoot, 'report-service'),
         description: '同步报表侧接口',
         depends_on: ['T1'],
+        skip_solution: true,
         task_contract: {
           required_artifacts: ['fullstack/docs/upstream.md'],
         },

@@ -7,6 +7,7 @@ import { getApplicableRouteContext } from './runtime-context.mjs'
 import { readTurnState } from './turn-state.mjs'
 import { getCurrentStateFile } from './fullstack-runtime-store.mjs'
 import { auditDispatch } from './fullstack-dispatch.mjs'
+import { aggregateSolutionStatus } from './fullstack-solution.mjs'
 
 function normalizePath(filePath = '') {
   return filePath ? normalize(resolve(filePath)) : ''
@@ -106,6 +107,14 @@ export function inspectFullstackCloseout({ cwd = process.cwd() } = {}) {
       `检测到未真实派发就标记完成的任务（伪完成）：${dispatchAudit.fabricated_completions.join(', ')}。`
       + '请对这些任务真实派发对应职能工程师子代理，留下 start 事件与 handoff 交付记录后再收尾。',
     )
+  }
+
+  const solutionStatus = aggregateSolutionStatus(state)
+  if (solutionStatus.rejected.length) {
+    issues.push(`存在方案评审未通过的任务：${solutionStatus.rejected.join(', ')}。请按评审意见修订方案并重新评审。`)
+  }
+  if (solutionStatus.pending_review.length) {
+    issues.push(`存在方案尚未通过评审的任务：${solutionStatus.pending_review.join(', ')}。代码前必须先完成方案评审。`)
   }
 
   return {

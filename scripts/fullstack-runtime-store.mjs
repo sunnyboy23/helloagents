@@ -146,6 +146,33 @@ export function getIndexRoot() {
   return runtimeRoot ? join(runtimeRoot, 'index') : join(getDefaultGlobalRoot(), 'index')
 }
 
+// Persistent cross-project docs root. Deliberately resolves to a location that
+// is NOT inside any participant project (avoids ownership coupling), and is a
+// sibling of the per-need `tasks/` runtime so it is never overwritten by a new
+// task group. Falls back to the default global root even in project mode.
+export function getDocsRoot() {
+  const envRoot = String(process.env.HELLOAGENTS_FULLSTACK_DOCS_ROOT || '').trim()
+  if (envRoot) return normalizePath(envRoot)
+
+  const cfg = readGlobalConfig()
+  const configured = String(cfg.FULLSTACK_DOCS_ROOT || '').trim()
+  if (configured) return normalizePath(configured)
+
+  const runtimeRoot = getConfiguredRuntimeRoot()
+  return runtimeRoot ? join(runtimeRoot, 'docs') : join(getDefaultGlobalRoot(), 'docs')
+}
+
+export function getCrossImpactDir(feature) {
+  const safeFeature = String(feature || 'unnamed').replace(/[^\w.-]+/gu, '_')
+  return join(getDocsRoot(), safeFeature)
+}
+
+export function ensureDocsDir(feature) {
+  const dir = getCrossImpactDir(feature)
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 export function getGlobalConfigFile() {
   return join(getConfigRoot(), 'fullstack.yaml')
 }

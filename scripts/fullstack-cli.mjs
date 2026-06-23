@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
@@ -35,6 +35,8 @@ import { TaskStore, loadTaskPayload, resolveStateFileArg } from './fullstack-tas
 import { scanDependencies, scanServiceCatalog } from './fullstack-dep-scan.mjs'
 import { buildConfigSuggestions } from './fullstack-config-advisor.mjs'
 import { auditDispatch, buildDispatchManifest } from './fullstack-dispatch.mjs'
+import { aggregateSolutionStatus } from './fullstack-solution.mjs'
+import { publishDocument } from './fullstack-publish.mjs'
 
 function safeJsonString(value) {
   return `${JSON.stringify(value, null, 2)}\n`
@@ -42,7 +44,7 @@ function safeJsonString(value) {
 
 function printUsage() {
   process.stdout.write([
-    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|dispatch-manifest|dispatch-audit|config-suggest|cross-deps|scan-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|sync|kb> ...',
+    '用法: helloagents fullstack <runtime|migrate|init|projects|engineers|bind|unbind|impact|dispatch-plan|dispatch-manifest|dispatch-audit|config-suggest|cross-deps|scan-deps|ownership|create|status|next-layer|start|complete|fail|retry|feedback|report|solution-submit|solution-review|solution-status|solution-consistency|solution-publish|sync|kb> ...',
     "示例: helloagents fullstack runtime set-root '~/.helloagents/runtime' --create",
     '示例: helloagents fullstack runtime choose-root',
   ].join('\n') + '\n')
@@ -169,9 +171,9 @@ export async function handleFullstackCli(args = []) {
     return Boolean(result.success)
   }
 
-  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'dispatch-manifest', 'dispatch-audit', 'config-suggest', 'cross-deps', 'scan-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'sync', 'kb'].includes(group)) {
+  if (['projects', 'engineers', 'bind', 'unbind', 'impact', 'dispatch-plan', 'dispatch-manifest', 'dispatch-audit', 'config-suggest', 'cross-deps', 'scan-deps', 'ownership', 'create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'solution-submit', 'solution-review', 'solution-status', 'solution-consistency', 'solution-publish', 'sync', 'kb'].includes(group)) {
     const configPath = resolveFullstackConfigFile({ projectRoot, kbRoot })
-    const needsConfig = !['create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'dispatch-manifest', 'dispatch-audit'].includes(group)
+    const needsConfig = !['create', 'status', 'next-layer', 'start', 'complete', 'fail', 'retry', 'feedback', 'report', 'dispatch-manifest', 'dispatch-audit', 'solution-submit', 'solution-review', 'solution-status', 'solution-consistency', 'solution-publish'].includes(group)
     const config = needsConfig ? loadConfig(configPath) : null
     if (needsConfig && config?.error) {
       process.stdout.write(safeJsonString({
@@ -463,7 +465,12 @@ export async function handleFullstackCli(args = []) {
       }
       const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
       const store = new TaskStore(stateFile, { projectRoot, kbRoot })
-      process.stdout.write(safeJsonString({ success: store.startTask(args[1]) }))
+      const startResult = store.startTask(args[1])
+      if (startResult && typeof startResult === 'object') {
+        process.stdout.write(safeJsonString(startResult))
+        return Boolean(startResult.success)
+      }
+      process.stdout.write(safeJsonString({ success: Boolean(startResult) }))
       return true
     }
     if (group === 'complete') {
@@ -540,6 +547,89 @@ export async function handleFullstackCli(args = []) {
       const audit = auditDispatch(store.state)
       process.stdout.write(safeJsonString(audit))
       return !audit.has_fabricated
+    }
+    if (group === 'solution-submit') {
+      if (args.length < 3) {
+        process.stdout.write([
+          '用法: helloagents fullstack solution-submit <task_id> <solution_path> [--state-file path]',
+          'Usage: helloagents fullstack solution-submit <task_id> <solution_path> [--state-file path]',
+        ].join('\n') + '\n')
+        return false
+      }
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      let content = ''
+      try {
+        content = readFileSync(args[2], 'utf-8')
+      } catch {
+        process.stdout.write(safeJsonString({ success: false, error: `Solution document not found: ${args[2]}` }))
+        return false
+      }
+      const result = store.submitSolution(args[1], args[2], content)
+      process.stdout.write(safeJsonString(result))
+      return Boolean(result.success)
+    }
+    if (group === 'solution-review') {
+      if (args.length < 3) {
+        process.stdout.write([
+          '用法: helloagents fullstack solution-review <task_id> <approved|rejected> [--findings a,b] [--reviewer id] [--state-file path]',
+          'Usage: helloagents fullstack solution-review <task_id> <approved|rejected> [--findings a,b] [--reviewer id] [--state-file path]',
+        ].join('\n') + '\n')
+        return false
+      }
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      let findings = []
+      let reviewer = ''
+      const findingsIndex = args.indexOf('--findings')
+      if (findingsIndex >= 0 && findingsIndex + 1 < args.length) {
+        findings = args[findingsIndex + 1].split(',').map((item) => item.trim()).filter(Boolean)
+      }
+      const reviewerIndex = args.indexOf('--reviewer')
+      if (reviewerIndex >= 0 && reviewerIndex + 1 < args.length) reviewer = args[reviewerIndex + 1]
+      const result = store.reviewSolution(args[1], args[2], { findings, reviewer })
+      process.stdout.write(safeJsonString(result))
+      return Boolean(result.success)
+    }
+    if (group === 'solution-status') {
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      process.stdout.write(safeJsonString(aggregateSolutionStatus(store.state)))
+      return true
+    }
+    if (group === 'solution-consistency') {
+      // Layer 2: orchestrator cross-solution consistency input. Surfaces all
+      // approved solution paths so the main agent can check cross-service conflicts.
+      const stateFile = getStateFileArg(args.slice(1), { projectRoot, kbRoot })
+      const store = new TaskStore(stateFile, { projectRoot, kbRoot })
+      const aggregate = aggregateSolutionStatus(store.state)
+      process.stdout.write(safeJsonString({
+        ready_for_consistency_check: aggregate.ready_for_consistency_check,
+        total_required: aggregate.total_required,
+        approved_count: aggregate.approved_count,
+        pending_review: aggregate.pending_review,
+        rejected: aggregate.rejected,
+        solution_paths: aggregate.solution_paths,
+        note: aggregate.ready_for_consistency_check
+          ? '所有服务级方案已 approved，主代理可进行跨方案一致性核对（接口契约/灰度顺序/数据口径）。'
+          : '仍有方案未通过评审，先完成单方案品审再做跨方案一致性核对。',
+      }))
+      return true
+    }
+    if (group === 'solution-publish') {
+      if (args.length < 2) {
+        process.stdout.write([
+          '用法: helloagents fullstack solution-publish <doc_path> [--target feishu|none]',
+          'Usage: helloagents fullstack solution-publish <doc_path> [--target feishu|none]',
+        ].join('\n') + '\n')
+        return false
+      }
+      const targetIndex = args.indexOf('--target')
+      const override = targetIndex >= 0 && targetIndex + 1 < args.length ? { target: args[targetIndex + 1] } : {}
+      if (args.includes('--dry-run')) override.dryRun = true
+      const result = await publishDocument(args[1], override)
+      process.stdout.write(safeJsonString(result))
+      return Boolean(result.success)
     }
     if (group === 'sync') {
       if (args[1] === 'batch') {
@@ -657,6 +747,11 @@ export async function handleFullstackCli(args = []) {
       'retry',
       'feedback',
       'report',
+      'solution-submit',
+      'solution-review',
+      'solution-status',
+      'solution-consistency',
+      'solution-publish',
       'sync',
       'kb',
     ],

@@ -251,6 +251,54 @@ helloagents fullstack kb init '{项目路径}'
 禁止: 把所有工程师的任务、状态、交付记录只写在发起项目下
 ```
 
+### 5.7 方案先行与两层评审（代码开写前必须把影响面评估清楚）
+
+核心原则：**代码开写前，每个服务必须先输出技术方案、通过评审，才能开始编码**。这是默认开启的结构性闸门（task store 强制），不靠提示词自觉。
+
+```yaml
+方案落点（跟着归属走，不复制全量）:
+  服务级方案: {服务项目}/.helloagents/docs/{feature}_technical_solution.md（事实源=该服务代码，跟各服务 repo 走）
+  跨项目总览: 全局 docs 根 FULLSTACK_RUNTIME_ROOT/docs/{feature}/（无单一归属，不塞进任何参与项目）
+  上游契约引用: 下游 .helloagents/api/upstream/（只读引用，靠同步而非复制全量）
+
+方案生命周期（task store 维护，每个任务一条）:
+  pending → drafted → under_review → approved | rejected
+  - pending: 尚未提交方案
+  - drafted: 已提交但缺必填章节（影响面/拓扑/回滚/灰度/一致性），未进入评审
+  - under_review: 必填章节齐全，等待评审
+  - approved: 评审通过，对应实现任务才可 start
+  - rejected: 评审未通过，带 findings，作者据此修订后重新提交
+
+闸门（默认开，可关）:
+  - solution_required=true（默认）的任务，方案未 approved 时 startTask 被拒，给出原因
+  - 纯文案/纯配置等无需方案的任务，创建时标 skip_solution:true 跳过
+  - fullstack gate 收尾时同步校验：有未通过评审的方案不得报告完成
+
+两层评审:
+  第一层（单方案品审，独立 reviewer 子代理结合代码）:
+    - 派一个独立 reviewer 子代理，要求它重读真实代码找影响面漏洞（漏调用方？漏下游？回滚是否真可行？灰度/一致性是否落地）
+    - 不是复述作者方案，而是带着"找漏洞"的任务对抗式审查
+    - 结论写回：helloagents fullstack solution-review {task_id} approved|rejected --findings ... --reviewer ...
+  第二层（跨方案一致性，主代理）:
+    - 所有服务级方案 approved 后，主代理读取 solution-consistency 汇总
+    - 检查跨服务矛盾：A 改了接口响应结构，B 的方案还在用旧结构吗？各服务灰度窗口冲突吗？数据口径一致吗？
+    - 单方案 reviewer 看不到别人的方案，只有主代理有全局视图，这层只能主代理做
+
+命令:
+  helloagents fullstack solution-submit {task_id} {方案文件路径}   # 提交方案（校验必填章节）
+  helloagents fullstack solution-review {task_id} approved|rejected [--findings a,b] [--reviewer id]  # 第一层品审结论
+  helloagents fullstack solution-status                            # 查看本任务组方案状态汇总
+  helloagents fullstack solution-consistency                       # 第二层跨方案一致性输入（列出所有 approved 方案路径）
+  helloagents fullstack solution-publish {方案路径} [--target feishu|none]  # 可选沉淀到飞书
+
+方案沉淀（飞书可选，经 lark-cli 接通）:
+  - 本地 md 永远是正本；配了飞书则推一份可读副本并把 doc token + 链接回填到方案头部
+  - 幂等：首次 `docs +create` 创建（用 user 身份），之后 `docs +update --mode overwrite` 更新同一篇，不重复建文档
+  - 创建新文档需在 doc_publish.feishu 配 folder_token 或 wiki_space；未配则报 needs_config，不伪造已发布
+  - 未配飞书（target=none，默认）跳过，不阻断流程
+  - `--dry-run` 只打印将执行的 lark-cli 命令，不实际发布
+```
+
 ### 6. 确认信息
 
 ```yaml
@@ -288,26 +336,32 @@ helloagents fullstack kb init '{项目路径}'
        - fullstack/docs/tasks.md 已存在
        - fullstack/docs/agents.md 已存在
        - fullstack/docs/upstream.md 已存在
-  2. 读取派发清单（强制，防止漏派发）:
+  2. 方案先行闸门（强制，编码前）:
+     - 对每个 solution_required 任务，先派工程师按 technical_solution 模板结合真实代码出方案 → solution-submit
+     - 派独立 reviewer 子代理结合代码品审 → solution-review（第一层）
+     - 全部 approved 后，主代理读 solution-consistency 做跨方案一致性核对（第二层）
+     - rejected 的方案按 findings 修订后重新提交评审；未 approved 的任务 start 会被闸门拒绝
+     - 详见 5.7 方案先行与两层评审
+  3. 读取派发清单（强制，防止漏派发）:
      - 调用 `helloagents fullstack dispatch-manifest`
      - manifest 列出每个任务必须派发的 expected_subagent 和交付回写路径
      - 对 manifest 中**每一个** dispatchable 任务，都必须真实调用对应职能工程师子代理，不允许主代理自行模拟实现或跳过派发
-  3. 按 DAG 层级派发:
+  4. 按 DAG 层级派发:
      - 同层任务并行（≤6 并发）
      - 层级间串行等待
-     - 每个任务派发前调用 `start`（产生 task_started 事件），子代理完成后写 handoff 交付文件
-  4. 收集 ResultMessage（包含开发、验证、交付结果），收到后调用 `feedback`
+     - 每个任务派发前调用 `start`（产生 task_started 事件，方案未 approved 会被拒），子代理完成后写 handoff 交付文件
+  5. 收集 ResultMessage（包含开发、验证、交付结果），收到后调用 `feedback`
      - 上游任务完成且产出真实 API 契约时，下游任务契约会自动重算（见 3.6 契约协商）
-  5. 每层完成后调用 `report`，确保 summary/current_layer/blocked_tasks 持续更新
-  6. 更新任务状态（status + verification + closeout + summary）
+  6. 每层完成后调用 `report`，确保 summary/current_layer/blocked_tasks 持续更新
+  7. 更新任务状态（status + verification + closeout + summary）
      - `report` / `status` 必须检查 `artifact_status.missing`
      - 缺少 `fullstack/docs/tasks.md`、`agents.md`、`upstream.md` 时不得报告 fullstack 收尾完成
-  7. 派发审计（强制，收尾前）:
+  8. 派发审计（强制，收尾前）:
      - 调用 `helloagents fullstack dispatch-audit`
      - `fabricated_completions` 非空表示存在"未真实派发就标记完成"的伪完成任务
      - 有伪完成任务时禁止报告 fullstack 完成，必须真实派发后补齐 start 事件与 handoff 记录
-  8. 同步技术文档
-  9. 进入任务组收尾
+  9. 同步技术文档（可选 solution-publish 沉淀方案到飞书）
+  10. 进入任务组收尾
 ```
 
 运行态命令约束：
@@ -330,6 +384,15 @@ helloagents fullstack dispatch-manifest
 
 # 6) 派发审计（收尾前检查是否存在伪完成）
 helloagents fullstack dispatch-audit
+
+# 7) 方案先行（编码前，强制）
+helloagents fullstack solution-submit '{task_id}' '{方案文件路径}'
+helloagents fullstack solution-review '{task_id}' approved|rejected --findings '...' --reviewer '{id}'
+helloagents fullstack solution-status
+helloagents fullstack solution-consistency
+
+# 8) 方案沉淀（可选，飞书）
+helloagents fullstack solution-publish '{方案路径}' --target feishu|none
 ```
 
 说明：

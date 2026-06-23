@@ -3,6 +3,15 @@ import { dirname, join, relative, resolve } from 'node:path'
 
 import { ensureRuntimeDirs, getCurrentStateFile } from './fullstack-runtime-store.mjs'
 import { renegotiateReadyDownstream } from './fullstack-renegotiate.mjs'
+import {
+  SOLUTION_STATUS,
+  aggregateSolutionStatus,
+  applyReviewVerdict,
+  isSolutionApprovedForStart,
+  solutionBlockReason,
+  statusAfterSubmit,
+  validateSolutionContent,
+} from './fullstack-solution.mjs'
 
 export const DEFAULT_FULLSTACK_REQUIRED_ARTIFACTS = [
   {
@@ -476,6 +485,8 @@ export class TaskStore {
     const tasksDict = {}
     tasks.forEach((task) => {
       if (!task?.task_id) return
+      // skip_solution (e.g. pure docs/config change) opts a task out of the gate.
+      const solutionRequired = task.skip_solution === true ? false : (task.solution_required !== false)
       tasksDict[task.task_id] = {
         ...task,
         status: 'pending',
@@ -483,6 +494,10 @@ export class TaskStore {
         verification_status: 'pending',
         closeout_status: 'pending',
         task_contract: task.task_contract || {},
+        solution_required: solutionRequired,
+        solution_status: solutionRequired ? SOLUTION_STATUS.PENDING : 'skipped',
+        service_solution_path: task.service_solution_path || '',
+        solution_review: null,
       }
     })
 
@@ -666,6 +681,25 @@ export class TaskStore {
       }
     }
 
+    // Solution gate: code may not start before its technical solution is approved
+    // (unless this task opted out via skip_solution). Default-on, can be disabled.
+    if (!isSolutionApprovedForStart(task)) {
+      const reason = solutionBlockReason(task)
+      this.writeLocalProjection(taskId, 'task_solution_blocked', { reason })
+      appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+        event_type: 'task_solution_blocked',
+        task_group_id: this.state.task_group_id,
+        task_id: taskId,
+        engineer_id: task.engineer_id,
+        project: task.project,
+        solution_status: task.solution_status,
+        reason,
+        occurred_at: nowIso(),
+      })
+      this.saveState()
+      return { success: false, reason, solution_status: task.solution_status }
+    }
+
     task.status = 'in_progress'
     task.started_at = nowIso()
     this.updateProgress()
@@ -757,6 +791,77 @@ export class TaskStore {
     return updates
   }
 
+  // Author submits a service-level solution for a task. Validates required
+  // sections against the document content; only a complete draft enters review.
+  submitSolution(taskId, solutionPath, content) {
+    const task = this.state.tasks?.[taskId]
+    if (!task) return { success: false, error: `Task not found: ${taskId}` }
+    if (task.solution_required === false) {
+      return { success: false, error: `Task ${taskId} opted out of solution (skip_solution)` }
+    }
+
+    const validation = validateSolutionContent(content || '')
+    task.service_solution_path = solutionPath || task.service_solution_path || ''
+    task.solution_status = statusAfterSubmit(validation)
+    task.solution_submitted_at = nowIso()
+
+    this.writeLocalProjection(taskId, 'solution_submitted', {
+      solution_path: task.service_solution_path,
+      valid: validation.valid,
+      missing_sections: validation.missing_sections,
+    })
+    appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+      event_type: 'solution_submitted',
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      solution_status: task.solution_status,
+      valid: validation.valid,
+      occurred_at: task.solution_submitted_at,
+    })
+    this.saveState()
+    return {
+      success: true,
+      task_id: taskId,
+      solution_status: task.solution_status,
+      valid: validation.valid,
+      missing_sections: validation.missing_sections,
+      filled_sections: validation.filled_sections,
+    }
+  }
+
+  // Reviewer (layer 1) records an approved/rejected verdict on a task's solution.
+  reviewSolution(taskId, verdict, { findings = [], reviewer = '' } = {}) {
+    const task = this.state.tasks?.[taskId]
+    if (!task) return { success: false, error: `Task not found: ${taskId}` }
+    if (task.solution_required === false) {
+      return { success: false, error: `Task ${taskId} opted out of solution (skip_solution)` }
+    }
+    if (task.solution_status !== SOLUTION_STATUS.UNDER_REVIEW) {
+      return { success: false, error: `Task ${taskId} solution is not under review (current: ${task.solution_status}). Submit a complete draft first.` }
+    }
+
+    const outcome = applyReviewVerdict(verdict, { findings, reviewer, reviewedAt: nowIso() })
+    if (outcome.error) return { success: false, error: outcome.error }
+
+    task.solution_status = outcome.status
+    task.solution_review = outcome.review
+
+    this.writeLocalProjection(taskId, 'solution_reviewed', {
+      verdict: outcome.review.verdict,
+      findings: outcome.review.findings,
+    })
+    appendJsonLine(this.state.global_runtime?.event_log || join(dirname(this.stateFile), 'events.ndjson'), {
+      event_type: 'solution_reviewed',
+      task_group_id: this.state.task_group_id,
+      task_id: taskId,
+      verdict: outcome.review.verdict,
+      solution_status: task.solution_status,
+      occurred_at: outcome.review.reviewed_at,
+    })
+    this.saveState()
+    return { success: true, task_id: taskId, solution_status: task.solution_status, review: outcome.review }
+  }
+
   failTask(taskId, error) {
     return this.completeTask(taskId, { error }, 'failed')
   }
@@ -836,6 +941,7 @@ export class TaskStore {
       verification: this.state.verification || {},
       closeout: this.state.closeout || {},
       artifact_status: this.state.artifact_status || {},
+      solution_status: aggregateSolutionStatus(this.state),
       global_runtime: this.state.global_runtime || {},
       current_layer: this.getCurrentLayerInfo(),
       tech_docs_synced: (this.state.tech_docs_synced || []).length,

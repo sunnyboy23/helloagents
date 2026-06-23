@@ -80,9 +80,29 @@ HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' hel
 HELLOAGENTS_PROJECT_ROOT='{项目根目录}' HELLOAGENTS_KB_ROOT='{KB_ROOT}' helloagents fullstack impact ./backend/user-service ./backend/order-service
 ```
 
+### 4.5 方案先行闸门（编码前强制）
+
+代码开写前，每个 solution_required 任务必须先出方案并通过两层评审。这是默认开启的结构性闸门，未通过的任务 `start` 会被拒。
+
+```
+1. 派工程师按 technical_solution 模板结合真实代码出服务级方案
+   → helloagents fullstack solution-submit {task_id} {方案路径}
+   方案落点：服务级落 {该服务}/.helloagents/docs/{feature}_technical_solution.md
+2. 第一层品审：派独立 reviewer 子代理结合代码找影响面漏洞（漏调用方/漏下游/回滚是否可行/灰度一致性是否落地）
+   → helloagents fullstack solution-review {task_id} approved|rejected --findings ... --reviewer ...
+   rejected → 作者按 findings 修订后重新 submit
+3. 第二层一致性：全部 approved 后，主代理读 solution-consistency 核对跨服务矛盾
+   （A 改接口结构 / B 还用旧结构？灰度窗口冲突？数据口径一致？）
+   → helloagents fullstack solution-consistency
+4. 跨项目总览落全局 docs 根 FULLSTACK_RUNTIME_ROOT/docs/{feature}/（不塞进任何参与项目）
+5. 可选：solution-publish 把方案沉淀到飞书（本地 md 为正本）
+```
+
+派发独立 reviewer 子代理的要点：prompt 必须要求它**重读真实代码挑漏洞**，而不是复述作者方案——作者有自证偏见，独立 reviewer 才挑得出作者没想到的影响面。
+
 ### 5. 并发派发
 
-按层级派发任务到工程师子代理:
+按层级派发任务到工程师子代理（每个任务方案已 approved 才能 start）:
 
 ```
 Layer 1 (无依赖): T1, T2 → 并行执行
